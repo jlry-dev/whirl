@@ -1,0 +1,3 @@
+DROP TABLE IF EXISTS "app_user";
+DROP TABLE IF EXISTS "country";
+DROP TABLE IF EXISTS "avatar";
