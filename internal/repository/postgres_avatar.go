@@ -41,7 +41,7 @@ func (r *AvatarRepo) CreateAvatar(ctx context.Context, qr Queryer, avatar *model
 }
 
 func (r *AvatarRepo) GetAvatarByPhash(ctx context.Context, qr Queryer, pHash string) (*model.Avatar, error) {
-	query := `SELECT (id, p_hash, public_id, asset_id, url) FROM "avatar" WHERE p_hash = $1`
+	query := `SELECT id, p_hash, public_id, asset_id, url FROM "avatar" WHERE p_hash = $1`
 
 	avatar := &model.Avatar{}
 

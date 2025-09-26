@@ -6,11 +6,13 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jlry-dev/whirl/internal/model"
+	"github.com/jlry-dev/whirl/internal/model/dto"
 )
 
 type UserRepository interface {
 	CreateUser(ctx context.Context, qr Queryer, user *model.User) (id int, err error)
 	UpdateAvatar(ctx context.Context, qr Queryer, user *model.User) (err error)
+	GetUserWithCountryByUsername(ctx context.Context, qr Queryer, username string) (*dto.UserWithCountryDTO, error)
 }
 
 type AvatarRepository interface {

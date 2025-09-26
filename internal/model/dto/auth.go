@@ -15,3 +15,14 @@ type RegisterSuccessDTO struct {
 	Token  string         `json:"token"`
 	User   map[string]any `json:"user"`
 }
+
+type LoginDTO struct {
+	Username string `json:"username" validate:"required,min=3,max=32,alphanum,excludesrune= "`
+	Password string `json:"password" validate:"required,min=8,max=128"`
+}
+
+type LoginSuccessDTO struct {
+	UserWithCountryDTO
+	Status int    `json:"status"`
+	Token  string `json:"token"`
+}

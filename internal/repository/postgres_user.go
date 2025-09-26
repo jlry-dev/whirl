@@ -6,11 +6,16 @@ import (
 	"fmt"
 
 	"github.com/jackc/pgerrcode"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jlry-dev/whirl/internal/model"
+	"github.com/jlry-dev/whirl/internal/model/dto"
 )
 
-var ErrDuplicateUser = errors.New("repo: duplicate user")
+var (
+	ErrDuplicateUser = errors.New("repo: duplicate user")
+	ErrNoRowsFound   = errors.New("repo: no user exist")
+)
 
 type UserRepo struct{}
 
@@ -51,4 +56,19 @@ func (r *UserRepo) UpdateAvatar(ctx context.Context, qr Queryer, user *model.Use
 	}
 
 	return nil
+}
+
+func (r *UserRepo) GetUserWithCountryByUsername(ctx context.Context, qr Queryer, username string) (*dto.UserWithCountryDTO, error) {
+	qry := `SELECT u.id, u.username, u.email, u.password, u.bio, u.bdate, c.iso_code_3, c.name FROM "app_user" AS u JOIN "country" AS c ON u.country_id = c.id WHERE u.username = $1`
+
+	userInfo := new(dto.UserWithCountryDTO)
+	if err := qr.QueryRow(ctx, qry, username).Scan(&userInfo.ID, &userInfo.Username, &userInfo.Email, &userInfo.Password, &userInfo.Bio, &userInfo.Bdate, &userInfo.CountryCode, &userInfo.CountryName); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return &dto.UserWithCountryDTO{}, ErrNoRowsFound
+		}
+
+		return &dto.UserWithCountryDTO{}, fmt.Errorf("repo: failed to get user: %w", err)
+	}
+
+	return userInfo, nil
 }

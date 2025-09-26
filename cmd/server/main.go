@@ -40,6 +40,7 @@ func main() {
 	// Multiplexer
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /auth/register", authHandlr.RegisterHandler)
+	mux.HandleFunc("POST /auth/login", authHandlr.LoginHandler)
 
 	// User handler
 	mux.HandleFunc("POST /user/avatar", userHandlr.UpdateAvatar)

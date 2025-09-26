@@ -18,6 +18,7 @@ type AuthHandlr struct {
 
 type AuthHandler interface {
 	RegisterHandler(w http.ResponseWriter, r *http.Request)
+	LoginHandler(w http.ResponseWriter, r *http.Request)
 }
 
 func NewAuthHandler(service service.AuthService, rspHandler *ResponseHandler, logger *slog.Logger) AuthHandler {
@@ -70,5 +71,44 @@ func (h *AuthHandlr) RegisterHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	respData.Status = http.StatusAccepted
-	h.rspHandler.JSON(w, http.StatusAccepted, respData)
+	h.rspHandler.JSON(w, respData.Status, respData)
+}
+
+func (h *AuthHandlr) LoginHandler(w http.ResponseWriter, r *http.Request) {
+	defer r.Body.Close()
+	ctx := r.Context()
+
+	if r.Method != http.MethodPost {
+		h.rspHandler.Error(w, http.StatusMethodNotAllowed, http.StatusText(http.StatusMethodNotAllowed))
+		return
+	}
+
+	if r.Header.Get("Content-Type") != "application/json" {
+		h.rspHandler.Error(w, http.StatusUnsupportedMediaType, http.StatusText(http.StatusUnsupportedMediaType))
+		return
+	}
+
+	data := new(dto.LoginDTO)
+
+	if err := json.NewDecoder(r.Body).Decode(data); err != nil {
+		h.logger.Error(err.Error(), slog.String("METHOD", r.Method), slog.String("PATH", r.URL.Path))
+		h.rspHandler.Error(w, http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError))
+		return
+	}
+
+	respData, err := h.srv.Login(ctx, data)
+	if err != nil {
+		h.logger.Error(err.Error(), slog.String("METHOD", r.Method), slog.String("PATH", r.URL.Path))
+
+		if errors.Is(err, service.ErrNoUserExist) || errors.Is(err, service.ErrInvalidCredential) {
+			h.rspHandler.Error(w, http.StatusUnauthorized, http.StatusText(http.StatusUnauthorized))
+			return
+		}
+
+		h.rspHandler.Error(w, http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError))
+		return
+	}
+
+	respData.Status = http.StatusOK
+	h.rspHandler.JSON(w, respData.Status, respData)
 }
