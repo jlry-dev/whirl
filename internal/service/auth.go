@@ -96,14 +96,18 @@ func (srv *AuthSrv) Register(ctx context.Context, data *dto.RegisterDTO) (*dto.R
 		return nil, fmt.Errorf("reg service : failed to generate token : %w", err)
 	}
 
+	userWithCountry := dto.UserWithCountryDTO{
+		ID:          uid,
+		Username:    data.Username,
+		Email:       data.Email,
+		Bio:         data.Bio,
+		Bdate:       pBdate,
+		CountryCode: data.CountryCode,
+	}
+
 	return &dto.RegisterSuccessDTO{
 		Token: token,
-		User: map[string]any{
-			"username": data.Username,
-			"email":    data.Email,
-			"bio":      data.Bio,
-			"country":  data.CountryCode,
-		},
+		User:  userWithCountry,
 	}, nil
 }
 
@@ -136,7 +140,7 @@ func (srv *AuthSrv) Login(ctx context.Context, data *dto.LoginDTO) (*dto.LoginSu
 	}
 
 	return &dto.LoginSuccessDTO{
-		UserWithCountryDTO: *userInfo,
-		Token:              token,
+		User:  *userInfo,
+		Token: token,
 	}, nil
 }

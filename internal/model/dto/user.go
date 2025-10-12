@@ -16,12 +16,12 @@ type UpdateAvatarSuccessDTO struct {
 }
 
 type UserWithCountryDTO struct {
-	ID          int       `json:"id"`
-	Username    string    `json:"username"`
-	Email       string    `json:"email"`
+	ID          int       `json:"id,omitempty"`
+	Username    string    `json:"username,omitempty"`
+	Email       string    `json:"email,omitempty"`
 	Password    string    `json:"-"`
-	Bio         string    `json:"bio"`
+	Bio         string    `json:"bio,omitempty"`
 	Bdate       time.Time `json:"birthdate"`
-	CountryCode string    `json:"country-code"`
-	CountryName string    `json:"country-name"`
+	CountryCode string    `json:"country-code,omitempty"`
+	CountryName string    `json:"country-name,omitempty"`
 }

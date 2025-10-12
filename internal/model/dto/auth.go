@@ -11,9 +11,9 @@ type RegisterDTO struct {
 }
 
 type RegisterSuccessDTO struct {
-	Status int            `json:"status"`
-	Token  string         `json:"token"`
-	User   map[string]any `json:"user"`
+	Status int                `json:"status"`
+	Token  string             `json:"token"`
+	User   UserWithCountryDTO `json:"user"`
 }
 
 type LoginDTO struct {
@@ -22,7 +22,7 @@ type LoginDTO struct {
 }
 
 type LoginSuccessDTO struct {
-	UserWithCountryDTO
-	Status int    `json:"status"`
-	Token  string `json:"token"`
+	Status int                `json:"status"`
+	Token  string             `json:"token"`
+	User   UserWithCountryDTO `json:"user:"`
 }
