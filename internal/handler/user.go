@@ -82,7 +82,7 @@ func (h *UserHandlr) UpdateAvatar(w http.ResponseWriter, r *http.Request) {
 	rspData, err := h.srv.UpdateAvatar(ctx, &dto)
 	if err != nil {
 		h.logger.Error(err.Error(), slog.String("METHOD", r.Method), slog.String("PATH", r.URL.Path))
-		if errors.Is(err, service.ErrInvalidImgFormat) {
+		if errors.Is(err, service.ErrUnsupportedImgFormat) {
 			h.rsp.Error(w, http.StatusBadRequest, http.StatusText(http.StatusBadRequest))
 			return
 		}

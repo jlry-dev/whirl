@@ -26,7 +26,7 @@ Uploads the avatar details to the database and returns the ID and URL
 In cases where the avatar information already exist, then the existing record will be used.
 */
 func (r *AvatarRepo) CreateAvatar(ctx context.Context, qr Queryer, avatar *model.Avatar) (*model.Avatar, error) {
-	query := `INSERT INTO "avatar" (p_hash, public_id, asset_id, url) VALUES ($1, $2, $3, $4) ON CONFLICT RETURNING id, url`
+	query := `INSERT INTO "avatar" (p_hash, public_id, asset_id, url) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING RETURNING id, url`
 	var aid int // Avatar ID
 	var url string
 

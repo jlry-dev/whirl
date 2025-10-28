@@ -1,10 +1,13 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"image"
+	"image/jpeg"
+	"image/png"
 	"log/slog"
 	"os"
 
@@ -18,7 +21,7 @@ import (
 	"github.com/jlry-dev/whirl/internal/repository"
 )
 
-var ErrInvalidImgFormat = errors.New("Image format unsupported")
+var ErrUnsupportedImgFormat = errors.New("Image format unsupported")
 
 type UserService interface {
 	UpdateAvatar(ctx context.Context, data *dto.UpdateAvatarDTO) (*dto.UpdateAvatarSuccessDTO, error)
@@ -53,10 +56,10 @@ func NewUserService(logger *slog.Logger, userRepo repository.UserRepository, ava
 
 func (srv *UserSrv) UpdateAvatar(ctx context.Context, data *dto.UpdateAvatarDTO) (*dto.UpdateAvatarSuccessDTO, error) {
 	// E decode if image ba jud ang imgData, will return error if not (dili supported ang format)
-	img, _, err := image.Decode(data.ImgFile)
+	img, format, err := image.Decode(data.ImgFile)
 	if err != nil {
-		if errors.Is(err, image.ErrFormat) {
-			return &dto.UpdateAvatarSuccessDTO{}, ErrInvalidImgFormat
+		if errors.Is(err, image.ErrFormat) || format != "jpg" || format != "jpeg" || format != "png" {
+			return &dto.UpdateAvatarSuccessDTO{}, ErrUnsupportedImgFormat
 		}
 
 		return &dto.UpdateAvatarSuccessDTO{}, err
@@ -66,14 +69,28 @@ func (srv *UserSrv) UpdateAvatar(ctx context.Context, data *dto.UpdateAvatarDTO)
 
 	// Check if naa ba sa database base sa pHash
 	avatarData, err := srv.avatarRepo.GetAvatarByPhash(ctx, srv.db, pHash)
+	// Upload the avatar if not exist otherwise user avatarData ditso
 	if err != nil {
-		// Upload the avatar if not exist
 		if errors.Is(err, repository.ErrAvatarNotExist) {
+			var err error
+			var imgByte bytes.Buffer
+
+			switch format {
+			case "png":
+				err = png.Encode(&imgByte, img)
+			default: // Cases for jpg or jpeg
+				err = jpeg.Encode(&imgByte, img, &jpeg.Options{
+					Quality: 90,
+				})
+			}
+			if err != nil {
+				return &dto.UpdateAvatarSuccessDTO{}, err
+			}
 
 			// Used for the public ID
 			pid := uuid.New().String()
 
-			cldRsp, err := srv.cld.Upload.Upload(ctx, img, uploader.UploadParams{
+			cldRsp, err := srv.cld.Upload.Upload(ctx, &imgByte, uploader.UploadParams{
 				PublicID: pid,
 				Folder:   "whirl-avatars",
 			})
