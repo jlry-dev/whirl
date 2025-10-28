@@ -4,6 +4,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/jlry-dev/whirl/internal/model/dto"
 	"github.com/jlry-dev/whirl/internal/service"
@@ -40,7 +41,9 @@ func (h *UserHandlr) UpdateAvatar(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if r.Header.Get("Content-Type") != "multipart/form-data" {
+	// Separate the content type and the content type parameter
+	typeHeader := strings.Split(r.Header.Get("Content-Type"), ";")
+	if typeHeader[0] != "multipart/form-data" {
 		h.rsp.Error(w, http.StatusUnsupportedMediaType, http.StatusText(http.StatusUnsupportedMediaType))
 		return
 	}
@@ -63,7 +66,8 @@ func (h *UserHandlr) UpdateAvatar(w http.ResponseWriter, r *http.Request) {
 	}
 	defer imgFile.Close()
 
-	userID, ok := ctx.Value("id").(int)
+	// This requires the authenticator middleware to add the user id to the request context
+	userID, ok := ctx.Value("userID").(int)
 	if !ok {
 		h.logger.Error("handler: failed to get the userID value out of ctx", slog.String("METHOD", r.Method), slog.String("PATH", r.URL.Path))
 		h.rsp.Error(w, http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError))

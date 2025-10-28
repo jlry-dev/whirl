@@ -8,6 +8,7 @@ import (
 
 	"github.com/jlry-dev/whirl/internal/config"
 	"github.com/jlry-dev/whirl/internal/handler"
+	"github.com/jlry-dev/whirl/internal/middleware"
 	"github.com/jlry-dev/whirl/internal/repository"
 	"github.com/jlry-dev/whirl/internal/service"
 	"github.com/joho/godotenv"
@@ -37,13 +38,18 @@ func main() {
 	authHandlr := handler.NewAuthHandler(authSrv, rspHandler, srvConfig.Logger)
 	userHandlr := handler.NewUserHandler(userSrv, srvConfig.Logger)
 
+	// Middleware
+	m := middleware.NewMiddleware(rspHandler, srvConfig.Logger)
+
 	// Multiplexer
 	mux := http.NewServeMux()
+
+	// Auth
 	mux.HandleFunc("POST /auth/register", authHandlr.RegisterHandler)
 	mux.HandleFunc("POST /auth/login", authHandlr.LoginHandler)
 
-	// User handler
-	mux.HandleFunc("POST /user/avatar", userHandlr.UpdateAvatar)
+	// User
+	mux.HandleFunc("POST /user/avatar", m.Authenticator(userHandlr.UpdateAvatar))
 
 	srv_addr := os.Getenv("SERVER_ADDRESS")
 	srv := http.Server{
