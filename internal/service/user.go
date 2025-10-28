@@ -39,10 +39,13 @@ func NewUserService(logger *slog.Logger, userRepo repository.UserRepository, ava
 		panic("initilizing cloudinary SDK failed")
 	}
 
+	pHash := imghash.NewPHash()
+
 	return &UserSrv{
 		logger:     logger,
 		userRepo:   userRepo,
 		avatarRepo: avatarRepo,
+		pHash:      &pHash,
 		db:         db,
 		cld:        cld,
 	}
