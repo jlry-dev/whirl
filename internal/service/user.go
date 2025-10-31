@@ -62,7 +62,7 @@ func (srv *UserSrv) UpdateAvatar(ctx context.Context, data *dto.UpdateAvatarDTO)
 			return &dto.UpdateAvatarSuccessDTO{}, ErrUnsupportedImgFormat
 		}
 
-		return &dto.UpdateAvatarSuccessDTO{}, err
+		return &dto.UpdateAvatarSuccessDTO{}, fmt.Errorf("serrvice: avatar update failed to decode image %w", err)
 	}
 
 	pHash := srv.pHash.Calculate(img).String() // the image hash, gamiton para as id to identify duplicated images

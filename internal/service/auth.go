@@ -113,30 +113,30 @@ func (srv *AuthSrv) Register(ctx context.Context, data *dto.RegisterDTO) (*dto.R
 
 func (srv *AuthSrv) Login(ctx context.Context, data *dto.LoginDTO) (*dto.LoginSuccessDTO, error) {
 	if err := srv.validate.Struct(data); err != nil {
-		return &dto.LoginSuccessDTO{}, ErrValidationFailed
+		return nil, ErrValidationFailed
 	}
 
 	userInfo, err := srv.userRepo.GetUserWithCountryByUsername(ctx, srv.db, data.Username)
 	if err != nil {
 		if errors.Is(err, repository.ErrNoRowsFound) {
-			return &dto.LoginSuccessDTO{}, ErrNoUserExist
+			return nil, ErrNoUserExist
 		}
 
-		return &dto.LoginSuccessDTO{}, fmt.Errorf("login service: failed to get user : %w", err)
+		return nil, fmt.Errorf("login service: failed to get user : %w", err)
 	}
 
 	// Match the password
 	if err := bcrypt.CompareHashAndPassword([]byte(userInfo.Password), []byte(data.Password)); err != nil {
 		if err == bcrypt.ErrMismatchedHashAndPassword {
-			return &dto.LoginSuccessDTO{}, ErrInvalidCredential
+			return nil, ErrInvalidCredential
 		}
 
-		return &dto.LoginSuccessDTO{}, fmt.Errorf("login service: failed trying to match password : %w", err)
+		return nil, fmt.Errorf("login service: failed trying to match password : %w", err)
 	}
 
 	token, err := util.GenerateJWT(ctx, userInfo.ID)
 	if err != nil {
-		return &dto.LoginSuccessDTO{}, fmt.Errorf("login service: failed to generate jwt token : %w", err)
+		return nil, fmt.Errorf("login service: failed to generate jwt token : %w", err)
 	}
 
 	return &dto.LoginSuccessDTO{
