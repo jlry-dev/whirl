@@ -140,7 +140,7 @@ func (srv *AuthSrv) Login(ctx context.Context, data *dto.LoginDTO) (*dto.LoginSu
 	}
 
 	return &dto.LoginSuccessDTO{
-		User:  *userInfo,
+		User:  userInfo,
 		Token: token,
 	}, nil
 }

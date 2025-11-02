@@ -22,7 +22,7 @@ type LoginDTO struct {
 }
 
 type LoginSuccessDTO struct {
-	Status int                `json:"status"`
-	Token  string             `json:"token"`
-	User   UserWithCountryDTO `json:"user:"`
+	Status int                 `json:"status"`
+	Token  string              `json:"token"`
+	User   *UserWithCountryDTO `json:"user:"`
 }
