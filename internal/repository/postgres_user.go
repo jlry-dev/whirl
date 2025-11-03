@@ -64,10 +64,10 @@ func (r *UserRepo) GetUserWithCountryByUsername(ctx context.Context, qr Queryer,
 	userInfo := new(dto.UserWithCountryDTO)
 	if err := qr.QueryRow(ctx, qry, username).Scan(&userInfo.ID, &userInfo.Username, &userInfo.Email, &userInfo.Password, &userInfo.Bio, &userInfo.Bdate, &userInfo.CountryCode, &userInfo.CountryName); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return &dto.UserWithCountryDTO{}, ErrNoRowsFound
+			return nil, ErrNoRowsFound
 		}
 
-		return &dto.UserWithCountryDTO{}, fmt.Errorf("repo: failed to get user: %w", err)
+		return nil, fmt.Errorf("repo: failed to get user: %w", err)
 	}
 
 	return userInfo, nil
