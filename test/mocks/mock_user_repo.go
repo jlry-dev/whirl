@@ -28,5 +28,10 @@ func (m *MockUserRepo) UpdateAvatar(ctx context.Context, qr repository.Queryer, 
 func (m *MockUserRepo) GetUserWithCountryByUsername(ctx context.Context, qr repository.Queryer, username string) (*dto.UserWithCountryDTO, error) {
 	args := m.Called(ctx, qr, username)
 
+	// Used to avoid when we input a nil return at index 0
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+
 	return args.Get(0).(*dto.UserWithCountryDTO), args.Error(1)
 }
