@@ -6,8 +6,10 @@ import (
 	"testing"
 
 	"github.com/go-playground/validator/v10"
+	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"golang.org/x/crypto/bcrypt"
 
 	"github.com/jlry-dev/whirl/internal/model"
 	"github.com/jlry-dev/whirl/internal/model/dto"
@@ -485,6 +487,156 @@ func Test_Register(t *testing.T) {
 
 			userRepo.AssertExpectations(t)
 			countryRepo.AssertExpectations(t)
+		})
+	}
+}
+
+func Test_Login(t *testing.T) {
+	testCase := []struct {
+		name      string
+		mockSetup func(u *mocks.MockUserRepo)
+		inp       *dto.LoginDTO
+		exp       *dto.LoginSuccessDTO
+		expErr    error
+		wantErr   bool
+	}{
+		{
+			name: "valid login",
+			mockSetup: func(u *mocks.MockUserRepo) {
+				hPass, err := bcrypt.GenerateFromPassword([]byte("validpassword"), bcrypt.DefaultCost)
+				if err != nil {
+					panic("failed to hash password")
+				}
+
+				u.On("GetUserWithCountryByUsername", mock.Anything, mock.Anything, "johndoe").Return(&dto.UserWithCountryDTO{
+					ID:          1,
+					Username:    "johndoe",
+					Email:       "johndoe@example.com",
+					Password:    string(hPass),
+					Bio:         "About me!",
+					CountryCode: "CAN",
+					CountryName: "CANADA",
+				},
+					nil,
+				)
+			},
+			inp: &dto.LoginDTO{
+				Username: "johndoe",
+				Password: "validpassword",
+			},
+			exp: &dto.LoginSuccessDTO{
+				Token: mock.Anything,
+				User: &dto.UserWithCountryDTO{
+					ID:          1,
+					Username:    "johndoe",
+					Email:       "johndoe@example.com",
+					Bio:         "About me!",
+					CountryCode: "CAN",
+					CountryName: "CANADA",
+				},
+			},
+			expErr:  nil,
+			wantErr: false,
+		},
+		{
+			name: "invalid login (user not found)",
+			mockSetup: func(u *mocks.MockUserRepo) {
+				u.On("GetUserWithCountryByUsername", mock.Anything, mock.Anything, "usernotexist").Return(&dto.UserWithCountryDTO{}, repository.ErrNoRowsFound)
+			},
+			inp: &dto.LoginDTO{
+				Username: "usernotexist",
+				Password: "validpassword",
+			},
+			expErr:  service.ErrNoUserExist,
+			wantErr: true,
+		},
+		{
+			name: "ivalid login (incorrect password)",
+			mockSetup: func(u *mocks.MockUserRepo) {
+				hPass, err := bcrypt.GenerateFromPassword([]byte("validpassword"), bcrypt.DefaultCost)
+				if err != nil {
+					panic("failed to hash password")
+				}
+
+				u.On("GetUserWithCountryByUsername", mock.Anything, mock.Anything, "johndoe").Return(&dto.UserWithCountryDTO{
+					ID:          1,
+					Username:    "johndoe",
+					Email:       "johndoe@example.com",
+					Password:    string(hPass),
+					Bio:         "About me!",
+					CountryCode: "CAN",
+					CountryName: "CANADA",
+				},
+					nil,
+				)
+			},
+			inp: &dto.LoginDTO{
+				Username: "johndoe",
+				Password: "notthecorrectpassword",
+			},
+			expErr:  service.ErrInvalidCredential,
+			wantErr: true,
+		},
+		{
+			name:      "ivalid login (empty password)",
+			mockSetup: func(u *mocks.MockUserRepo) {},
+			inp: &dto.LoginDTO{
+				Username: "johndoe",
+				Password: "",
+			},
+			expErr:  service.ErrValidationFailed,
+			wantErr: true,
+		},
+		{
+			name: "ivalid login (database error)",
+			mockSetup: func(u *mocks.MockUserRepo) {
+				u.On("GetUserWithCountryByUsername", mock.Anything, mock.Anything, "johndoe").Return(nil, pgx.ErrTxClosed)
+			},
+			inp: &dto.LoginDTO{
+				Username: "johndoe",
+				Password: "notthecorrectpassword",
+			},
+			expErr:  pgx.ErrTxClosed,
+			wantErr: true,
+		},
+	}
+
+	for _, tc := range testCase {
+		t.Run(tc.name, func(t *testing.T) {
+			vld := validator.New(validator.WithRequiredStructEnabled())
+			vld.RegisterValidation("age", util.ValidAgeValidator)
+			vld.RegisterValidation("dateformat", util.DateFormatValidator)
+
+			// Mocks
+			userRepo := mocks.MockUserRepo{}
+
+			tc.mockSetup(&userRepo)
+
+			srv := service.NewAuthService(vld, &userRepo, nil, nil)
+
+			resp, err := srv.Login(context.Background(), tc.inp)
+
+			if tc.wantErr {
+				assert.ErrorIs(t, err, tc.expErr)
+				assert.Nil(t, resp)
+			} else {
+				assert.NotNil(t, resp)
+				assert.NotEmpty(t, resp.Token)
+
+				respUser := resp.User
+				expUser := tc.exp.User
+
+				// Assert user info
+				assert.Equal(t, respUser.ID, expUser.ID)
+				assert.Equal(t, respUser.Username, expUser.Username)
+				assert.Equal(t, respUser.Email, expUser.Email)
+				assert.Equal(t, respUser.Bio, expUser.Bio)
+				assert.Equal(t, respUser.CountryCode, expUser.CountryCode)
+				assert.Equal(t, respUser.CountryName, expUser.CountryName)
+
+			}
+
+			userRepo.AssertExpectations(t)
 		})
 	}
 }
