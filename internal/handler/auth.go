@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/jlry-dev/whirl/internal/model/dto"
 	"github.com/jlry-dev/whirl/internal/service"
@@ -38,7 +39,8 @@ func (h *AuthHandlr) RegisterHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if r.Header.Get("Content-Type") != "application/json" {
+	typeHeader := strings.Split(r.Header.Get("Content-Type"), ";")
+	if typeHeader[0] != "application/json" {
 		h.rspHandler.Error(w, http.StatusUnsupportedMediaType, http.StatusText(http.StatusUnsupportedMediaType))
 		return
 	}
@@ -83,7 +85,8 @@ func (h *AuthHandlr) LoginHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if r.Header.Get("Content-Type") != "application/json" {
+	typeHeader := strings.Split(r.Header.Get("Content-Type"), ";")
+	if typeHeader[0] != "application/json" {
 		h.rspHandler.Error(w, http.StatusUnsupportedMediaType, http.StatusText(http.StatusUnsupportedMediaType))
 		return
 	}
