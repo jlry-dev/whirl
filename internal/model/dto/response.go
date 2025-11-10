@@ -6,6 +6,7 @@ type JSONResponse struct {
 }
 
 type JSONError struct {
-	Status int    `json:"status,omitempty"`
-	Error  string `json:"error,omitempty"`
+	Status int               `json:"status,omitempty"`
+	Error  string            `json:"error,omitempty"`
+	Fields map[string]string `json:"fields,omitempty"`
 }

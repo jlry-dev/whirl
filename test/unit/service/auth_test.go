@@ -475,7 +475,6 @@ func Test_Register(t *testing.T) {
 			resp, err := srv.Register(context.Background(), tc.inp)
 
 			if tc.wantErr {
-				t.Log(err.Error())
 				assert.ErrorIs(t, err, tc.expErr)
 			} else {
 				assert.NoError(t, err)

@@ -35,13 +35,13 @@ func (h *AuthHandlr) RegisterHandler(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	if r.Method != http.MethodPost {
-		h.rspHandler.Error(w, http.StatusMethodNotAllowed, http.StatusText(http.StatusMethodNotAllowed))
+		h.rspHandler.Error(w, http.StatusMethodNotAllowed, http.StatusText(http.StatusMethodNotAllowed), nil)
 		return
 	}
 
 	typeHeader := strings.Split(r.Header.Get("Content-Type"), ";")
 	if typeHeader[0] != "application/json" {
-		h.rspHandler.Error(w, http.StatusUnsupportedMediaType, http.StatusText(http.StatusUnsupportedMediaType))
+		h.rspHandler.Error(w, http.StatusUnsupportedMediaType, http.StatusText(http.StatusUnsupportedMediaType), nil)
 		return
 	}
 
@@ -50,7 +50,7 @@ func (h *AuthHandlr) RegisterHandler(w http.ResponseWriter, r *http.Request) {
 	err := json.NewDecoder(r.Body).Decode(data)
 	if err != nil {
 		h.logger.Error(err.Error(), slog.String("METHOD", r.Method), slog.String("PATH", r.URL.Path))
-		h.rspHandler.Error(w, http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError))
+		h.rspHandler.Error(w, http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError), nil)
 		return
 	}
 
@@ -58,17 +58,24 @@ func (h *AuthHandlr) RegisterHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		h.logger.Error(err.Error(), slog.String("METHOD", r.Method), slog.String("PATH", r.URL.Path))
 
-		if errors.Is(err, service.ErrValidationFailed) || errors.Is(err, service.ErrCountryNotSupported) {
-			h.rspHandler.Error(w, http.StatusBadRequest, http.StatusText(http.StatusBadRequest))
+		vldErrs, ok := err.(*service.ErrVldFailed)
+		if ok {
+			// This means that the err is of type ErrVldFailed
+			h.rspHandler.Error(w, http.StatusBadRequest, "failed to validate data", vldErrs.Fields)
+			return
+		}
+
+		if errors.Is(err, service.ErrCountryNotSupported) {
+			h.rspHandler.Error(w, http.StatusBadRequest, "country not supported", nil)
 			return
 		}
 
 		if errors.Is(err, service.ErrUserAlreadyExist) {
-			h.rspHandler.Error(w, http.StatusConflict, http.StatusText(http.StatusConflict))
+			h.rspHandler.Error(w, http.StatusConflict, "user already exist", nil)
 			return
 		}
 
-		h.rspHandler.Error(w, http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError))
+		h.rspHandler.Error(w, http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError), nil)
 		return
 	}
 
@@ -81,13 +88,13 @@ func (h *AuthHandlr) LoginHandler(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	if r.Method != http.MethodPost {
-		h.rspHandler.Error(w, http.StatusMethodNotAllowed, http.StatusText(http.StatusMethodNotAllowed))
+		h.rspHandler.Error(w, http.StatusMethodNotAllowed, http.StatusText(http.StatusMethodNotAllowed), nil)
 		return
 	}
 
 	typeHeader := strings.Split(r.Header.Get("Content-Type"), ";")
 	if typeHeader[0] != "application/json" {
-		h.rspHandler.Error(w, http.StatusUnsupportedMediaType, http.StatusText(http.StatusUnsupportedMediaType))
+		h.rspHandler.Error(w, http.StatusUnsupportedMediaType, http.StatusText(http.StatusUnsupportedMediaType), nil)
 		return
 	}
 
@@ -95,7 +102,7 @@ func (h *AuthHandlr) LoginHandler(w http.ResponseWriter, r *http.Request) {
 
 	if err := json.NewDecoder(r.Body).Decode(data); err != nil {
 		h.logger.Error(err.Error(), slog.String("METHOD", r.Method), slog.String("PATH", r.URL.Path))
-		h.rspHandler.Error(w, http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError))
+		h.rspHandler.Error(w, http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError), nil)
 		return
 	}
 
@@ -103,12 +110,17 @@ func (h *AuthHandlr) LoginHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		h.logger.Error(err.Error(), slog.String("METHOD", r.Method), slog.String("PATH", r.URL.Path))
 
-		if errors.Is(err, service.ErrNoUserExist) || errors.Is(err, service.ErrInvalidCredential) {
-			h.rspHandler.Error(w, http.StatusUnauthorized, http.StatusText(http.StatusUnauthorized))
+		if errors.Is(err, service.ErrNoUserExist) {
+			h.rspHandler.Error(w, http.StatusUnauthorized, "no user found", nil)
 			return
 		}
 
-		h.rspHandler.Error(w, http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError))
+		if errors.Is(err, service.ErrInvalidCredential) {
+			h.rspHandler.Error(w, http.StatusUnauthorized, "invalid user credentials", nil)
+			return
+		}
+
+		h.rspHandler.Error(w, http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError), nil)
 		return
 	}
 

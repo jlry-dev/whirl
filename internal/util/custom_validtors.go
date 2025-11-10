@@ -1,6 +1,7 @@
 package util
 
 import (
+	"fmt"
 	"reflect"
 	"strconv"
 	"strings"
@@ -76,4 +77,40 @@ func DateFormatValidator(fl validator.FieldLevel) bool {
 	// the first check might fail, so we need to check also if it's already in the correct format
 	_, err := time.Parse(time.DateOnly, v)
 	return err == nil
+}
+
+/*
+-- NOT A CUSTOM VALIDATOR --
+A helper function to get the validation message for failed fields
+*/
+func GetValidationMessage(e validator.FieldError) string {
+	switch e.ActualTag() {
+	case "required":
+		return "this field is required"
+	case "min":
+		return fmt.Sprintf("minimum length is %s", e.Param())
+	case "max":
+		return fmt.Sprintf("too long, maximum length is %s", e.Param())
+	case "alphanum":
+		return "alpha numeric values only"
+	case "excludesrune":
+		r := e.Param()
+		if r == " " {
+			return "field must not contain space"
+		} else {
+			return "field must not contain invalid characters"
+		}
+	case "email":
+		return "invlid email format"
+	case "eqfield":
+		return "password not match"
+	case "dateformat":
+		return "date must be in the correct format (YYYY-MM-DD)"
+	case "age":
+		return fmt.Sprintf("age must be atleast %s", e.Param())
+	case "iso3166_1_alpha3":
+		return "country code must be in the correct format (iso3166-1)"
+	default:
+		return "invalid field value"
+	}
 }

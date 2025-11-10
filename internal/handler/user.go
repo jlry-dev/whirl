@@ -37,14 +37,14 @@ func (h *UserHandlr) UpdateAvatar(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	if r.Method != http.MethodPost {
-		h.rsp.Error(w, http.StatusMethodNotAllowed, http.StatusText(http.StatusMethodNotAllowed))
+		h.rsp.Error(w, http.StatusMethodNotAllowed, http.StatusText(http.StatusMethodNotAllowed), nil)
 		return
 	}
 
 	// Separate the content type and the content type parameter
 	typeHeader := strings.Split(r.Header.Get("Content-Type"), ";")
 	if typeHeader[0] != "multipart/form-data" {
-		h.rsp.Error(w, http.StatusUnsupportedMediaType, http.StatusText(http.StatusUnsupportedMediaType))
+		h.rsp.Error(w, http.StatusUnsupportedMediaType, http.StatusText(http.StatusUnsupportedMediaType), nil)
 		return
 	}
 
@@ -54,14 +54,14 @@ func (h *UserHandlr) UpdateAvatar(w http.ResponseWriter, r *http.Request) {
 	err := r.ParseMultipartForm(MAX_IMAGE_SIZE)
 	if err != nil {
 		h.logger.Error(err.Error(), slog.String("METHOD", r.Method), slog.String("PATH", r.URL.Path))
-		h.rsp.Error(w, http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError))
+		h.rsp.Error(w, http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError), nil)
 		return
 	}
 
 	imgFile, _, err := r.FormFile("avatar_img")
 	if err != nil {
 		h.logger.Error(err.Error(), slog.String("METHOD", r.Method), slog.String("PATH", r.URL.Path))
-		h.rsp.Error(w, http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError))
+		h.rsp.Error(w, http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError), nil)
 		return
 	}
 	defer imgFile.Close()
@@ -70,7 +70,7 @@ func (h *UserHandlr) UpdateAvatar(w http.ResponseWriter, r *http.Request) {
 	userID, ok := ctx.Value("userID").(int)
 	if !ok {
 		h.logger.Error("handler: failed to get the userID value out of ctx", slog.String("METHOD", r.Method), slog.String("PATH", r.URL.Path))
-		h.rsp.Error(w, http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError))
+		h.rsp.Error(w, http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError), nil)
 		return
 	}
 
@@ -83,11 +83,11 @@ func (h *UserHandlr) UpdateAvatar(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		h.logger.Error(err.Error(), slog.String("METHOD", r.Method), slog.String("PATH", r.URL.Path))
 		if errors.Is(err, service.ErrUnsupportedImgFormat) {
-			h.rsp.Error(w, http.StatusBadRequest, http.StatusText(http.StatusBadRequest))
+			h.rsp.Error(w, http.StatusBadRequest, "unsupported image format", nil)
 			return
 		}
 
-		h.rsp.Error(w, http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError))
+		h.rsp.Error(w, http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError), nil)
 		return
 
 	}

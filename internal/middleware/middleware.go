@@ -36,7 +36,7 @@ func (m *middlewareStruct) Authenticator(next http.HandlerFunc) http.HandlerFunc
 		bearerSlice := strings.Fields(authHeader)
 
 		if len(bearerSlice) < 2 || len(bearerSlice) > 2 || bearerSlice[0] != "Bearer" {
-			m.rsp.Error(w, http.StatusUnauthorized, "invalid token")
+			m.rsp.Error(w, http.StatusUnauthorized, "invalid token", nil)
 			return
 		}
 
@@ -45,24 +45,24 @@ func (m *middlewareStruct) Authenticator(next http.HandlerFunc) http.HandlerFunc
 		if err != nil {
 			m.logger.Error(err.Error(), slog.String("METHOD", r.Method), slog.String("PATH", r.URL.Path))
 			if errors.Is(err, jwt.ErrTokenExpired) {
-				m.rsp.Error(w, http.StatusUnauthorized, "token expired")
+				m.rsp.Error(w, http.StatusUnauthorized, "token expired", nil)
 				return
 			}
-			m.rsp.Error(w, http.StatusUnauthorized, "invalid token")
+			m.rsp.Error(w, http.StatusUnauthorized, "invalid token", nil)
 			return
 		}
 
 		sub, err := token.Claims.GetSubject()
 		if err != nil {
 			m.logger.Error(err.Error(), slog.String("METHOD", r.Method), slog.String("PATH", r.URL.Path))
-			m.rsp.Error(w, http.StatusUnauthorized, "invalid token")
+			m.rsp.Error(w, http.StatusUnauthorized, "invalid token", nil)
 			return
 		}
 
 		userID, err := strconv.Atoi(sub)
 		if err != nil {
 			m.logger.Error(err.Error(), slog.String("METHOD", r.Method), slog.String("PATH", r.URL.Path))
-			m.rsp.Error(w, http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError))
+			m.rsp.Error(w, http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError), nil)
 		}
 
 		nCtx := context.WithValue(ctx, "userID", userID)

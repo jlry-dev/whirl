@@ -21,7 +21,6 @@ func NewResponseHandler(logger *slog.Logger) *ResponseHandler {
 }
 
 func (h *ResponseHandler) JSON(w http.ResponseWriter, statusCode int, payload any) {
-
 	buf := &bytes.Buffer{}
 	if err := json.NewEncoder(buf).Encode(payload); err != nil {
 		// In cases where there was encoding errors
@@ -34,10 +33,11 @@ func (h *ResponseHandler) JSON(w http.ResponseWriter, statusCode int, payload an
 	w.Write(buf.Bytes())
 }
 
-func (h *ResponseHandler) Error(w http.ResponseWriter, statusCode int, errMessage string) {
+func (h *ResponseHandler) Error(w http.ResponseWriter, statusCode int, errMessage string, fields map[string]string) {
 	payload := dto.JSONError{
 		Status: statusCode,
 		Error:  errMessage,
+		Fields: fields,
 	}
 
 	buf := &bytes.Buffer{}

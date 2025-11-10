@@ -15,8 +15,15 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
+type ErrVldFailed struct {
+	Fields map[string]string
+}
+
+func (e *ErrVldFailed) Error() string {
+	return "failed to validate fields."
+}
+
 var (
-	ErrValidationFailed    = errors.New("service: failed to validate data")
 	ErrUserAlreadyExist    = errors.New("service: user already exist")
 	ErrCountryNotSupported = errors.New("service: country not supported / not exist")
 	ErrNoUserExist         = errors.New("service: no user with credentials exist")
@@ -46,7 +53,16 @@ func NewAuthService(validate *validator.Validate, userRepo repository.UserReposi
 
 func (srv *AuthSrv) Register(ctx context.Context, data *dto.RegisterDTO) (*dto.RegisterSuccessDTO, error) {
 	if err := srv.validate.Struct(data); err != nil {
-		return nil, ErrValidationFailed
+		vldErrs := err.(validator.ValidationErrors)
+		ve := ErrVldFailed{
+			Fields: make(map[string]string),
+		} // the error struct the holds a map of the field name to the validation message
+
+		for _, e := range vldErrs {
+			ve.Fields[e.Field()] = util.GetValidationMessage(e)
+		}
+
+		return nil, &ve
 	}
 
 	cid, err := srv.countryRepo.GetIDByISO(ctx, srv.db, data.CountryCode)
@@ -113,7 +129,13 @@ func (srv *AuthSrv) Register(ctx context.Context, data *dto.RegisterDTO) (*dto.R
 
 func (srv *AuthSrv) Login(ctx context.Context, data *dto.LoginDTO) (*dto.LoginSuccessDTO, error) {
 	if err := srv.validate.Struct(data); err != nil {
-		return nil, ErrValidationFailed
+		vldErrs := err.(validator.ValidationErrors)
+		ve := new(ErrVldFailed) // the error struct the holds a map of the field name to the validation message
+		for _, e := range vldErrs {
+			ve.Fields[e.Tag()] = util.GetValidationMessage(e)
+		}
+
+		return nil, ve
 	}
 
 	userInfo, err := srv.userRepo.GetUserWithCountryByUsername(ctx, srv.db, data.Username)
