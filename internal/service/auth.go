@@ -130,12 +130,14 @@ func (srv *AuthSrv) Register(ctx context.Context, data *dto.RegisterDTO) (*dto.R
 func (srv *AuthSrv) Login(ctx context.Context, data *dto.LoginDTO) (*dto.LoginSuccessDTO, error) {
 	if err := srv.validate.Struct(data); err != nil {
 		vldErrs := err.(validator.ValidationErrors)
-		ve := new(ErrVldFailed) // the error struct the holds a map of the field name to the validation message
+		ve := ErrVldFailed{
+			Fields: make(map[string]string),
+		} // the error struct the holds a map of the field name to the validation message
 		for _, e := range vldErrs {
 			ve.Fields[e.Tag()] = util.GetValidationMessage(e)
 		}
 
-		return nil, ve
+		return nil, &ve
 	}
 
 	userInfo, err := srv.userRepo.GetUserWithCountryByUsername(ctx, srv.db, data.Username)
