@@ -2,7 +2,9 @@ package service_test
 
 import (
 	"context"
+	"errors"
 	"os"
+	"reflect"
 	"testing"
 
 	"github.com/go-playground/validator/v10"
@@ -100,7 +102,7 @@ func Test_Register(t *testing.T) {
 				CountryCode:     "CAN",
 			},
 			mockSetup: func(u *mocks.MockUserRepo, c *mocks.MockCountryRepo) {},
-			expErr:    service.ErrValidationFailed,
+			expErr:    &service.ErrVldFailed{},
 			wantErr:   true,
 		},
 		{
@@ -114,7 +116,7 @@ func Test_Register(t *testing.T) {
 				CountryCode:     "CAN",
 			},
 			mockSetup: func(u *mocks.MockUserRepo, c *mocks.MockCountryRepo) {},
-			expErr:    service.ErrValidationFailed,
+			expErr:    &service.ErrVldFailed{},
 			wantErr:   true,
 		},
 		{
@@ -128,7 +130,7 @@ func Test_Register(t *testing.T) {
 				CountryCode:     "CAN",
 			},
 			mockSetup: func(u *mocks.MockUserRepo, c *mocks.MockCountryRepo) {},
-			expErr:    service.ErrValidationFailed,
+			expErr:    &service.ErrVldFailed{},
 			wantErr:   true,
 		},
 		{
@@ -142,7 +144,7 @@ func Test_Register(t *testing.T) {
 				CountryCode:     "CAN",
 			},
 			mockSetup: func(u *mocks.MockUserRepo, c *mocks.MockCountryRepo) {},
-			expErr:    service.ErrValidationFailed,
+			expErr:    &service.ErrVldFailed{},
 			wantErr:   true,
 		},
 		{
@@ -156,7 +158,7 @@ func Test_Register(t *testing.T) {
 				CountryCode:     "CAN",
 			},
 			mockSetup: func(u *mocks.MockUserRepo, c *mocks.MockCountryRepo) {},
-			expErr:    service.ErrValidationFailed,
+			expErr:    &service.ErrVldFailed{},
 			wantErr:   true,
 		},
 		{
@@ -169,7 +171,7 @@ func Test_Register(t *testing.T) {
 				BirthDate:       "2004-05-20",
 			},
 			mockSetup: func(u *mocks.MockUserRepo, c *mocks.MockCountryRepo) {},
-			expErr:    service.ErrValidationFailed,
+			expErr:    &service.ErrVldFailed{},
 			wantErr:   true,
 		},
 		{
@@ -183,7 +185,7 @@ func Test_Register(t *testing.T) {
 				CountryCode:     "CAN",
 			},
 			mockSetup: func(u *mocks.MockUserRepo, c *mocks.MockCountryRepo) {},
-			expErr:    service.ErrValidationFailed,
+			expErr:    &service.ErrVldFailed{},
 			wantErr:   true,
 		},
 		{
@@ -197,7 +199,7 @@ func Test_Register(t *testing.T) {
 				CountryCode:     "CAN",
 			},
 			mockSetup: func(u *mocks.MockUserRepo, c *mocks.MockCountryRepo) {},
-			expErr:    service.ErrValidationFailed,
+			expErr:    &service.ErrVldFailed{},
 			wantErr:   true,
 		},
 		{
@@ -211,7 +213,7 @@ func Test_Register(t *testing.T) {
 				CountryCode:     "CAN",
 			},
 			mockSetup: func(u *mocks.MockUserRepo, c *mocks.MockCountryRepo) {},
-			expErr:    service.ErrValidationFailed,
+			expErr:    &service.ErrVldFailed{},
 			wantErr:   true,
 		},
 		{
@@ -225,7 +227,7 @@ func Test_Register(t *testing.T) {
 				CountryCode:     "CAN",
 			},
 			mockSetup: func(u *mocks.MockUserRepo, c *mocks.MockCountryRepo) {},
-			expErr:    service.ErrValidationFailed,
+			expErr:    &service.ErrVldFailed{},
 			wantErr:   true,
 		},
 		{
@@ -239,7 +241,7 @@ func Test_Register(t *testing.T) {
 				CountryCode:     "CAN",
 			},
 			mockSetup: func(u *mocks.MockUserRepo, c *mocks.MockCountryRepo) {},
-			expErr:    service.ErrValidationFailed,
+			expErr:    &service.ErrVldFailed{},
 			wantErr:   true,
 		},
 		{
@@ -253,7 +255,7 @@ func Test_Register(t *testing.T) {
 				CountryCode:     "CAN",
 			},
 			mockSetup: func(u *mocks.MockUserRepo, c *mocks.MockCountryRepo) {},
-			expErr:    service.ErrValidationFailed,
+			expErr:    &service.ErrVldFailed{},
 			wantErr:   true,
 		},
 		{
@@ -267,7 +269,7 @@ func Test_Register(t *testing.T) {
 				CountryCode:     "CAN",
 			},
 			mockSetup: func(u *mocks.MockUserRepo, c *mocks.MockCountryRepo) {},
-			expErr:    service.ErrValidationFailed,
+			expErr:    &service.ErrVldFailed{},
 			wantErr:   true,
 		},
 		{
@@ -282,7 +284,7 @@ func Test_Register(t *testing.T) {
 				CountryCode:     "CAN",
 			},
 			mockSetup: func(u *mocks.MockUserRepo, c *mocks.MockCountryRepo) {},
-			expErr:    service.ErrValidationFailed,
+			expErr:    &service.ErrVldFailed{},
 			wantErr:   true,
 		},
 		{
@@ -296,7 +298,7 @@ func Test_Register(t *testing.T) {
 				CountryCode:     "CAN",
 			},
 			mockSetup: func(u *mocks.MockUserRepo, c *mocks.MockCountryRepo) {},
-			expErr:    service.ErrValidationFailed,
+			expErr:    &service.ErrVldFailed{},
 			wantErr:   true,
 		},
 		{
@@ -310,7 +312,7 @@ func Test_Register(t *testing.T) {
 				CountryCode:     "CAN",
 			},
 			mockSetup: func(u *mocks.MockUserRepo, c *mocks.MockCountryRepo) {},
-			expErr:    service.ErrValidationFailed,
+			expErr:    &service.ErrVldFailed{},
 			wantErr:   true,
 		},
 		{
@@ -324,7 +326,7 @@ func Test_Register(t *testing.T) {
 				CountryCode:     "CAN",
 			},
 			mockSetup: func(u *mocks.MockUserRepo, c *mocks.MockCountryRepo) {},
-			expErr:    service.ErrValidationFailed,
+			expErr:    &service.ErrVldFailed{},
 			wantErr:   true,
 		},
 		{
@@ -338,7 +340,7 @@ func Test_Register(t *testing.T) {
 				CountryCode:     "CAN",
 			},
 			mockSetup: func(u *mocks.MockUserRepo, c *mocks.MockCountryRepo) {},
-			expErr:    service.ErrValidationFailed,
+			expErr:    &service.ErrVldFailed{},
 			wantErr:   true,
 		},
 		{
@@ -352,7 +354,7 @@ func Test_Register(t *testing.T) {
 				CountryCode:     "CAN",
 			},
 			mockSetup: func(u *mocks.MockUserRepo, c *mocks.MockCountryRepo) {},
-			expErr:    service.ErrValidationFailed,
+			expErr:    &service.ErrVldFailed{},
 			wantErr:   true,
 		},
 		{
@@ -366,7 +368,7 @@ func Test_Register(t *testing.T) {
 				CountryCode:     "CAN",
 			},
 			mockSetup: func(u *mocks.MockUserRepo, c *mocks.MockCountryRepo) {},
-			expErr:    service.ErrValidationFailed,
+			expErr:    &service.ErrVldFailed{},
 			wantErr:   true,
 		},
 		{
@@ -380,7 +382,7 @@ func Test_Register(t *testing.T) {
 				CountryCode:     "CAN",
 			},
 			mockSetup: func(u *mocks.MockUserRepo, c *mocks.MockCountryRepo) {},
-			expErr:    service.ErrValidationFailed,
+			expErr:    &service.ErrVldFailed{},
 			wantErr:   true,
 		},
 		{
@@ -394,7 +396,7 @@ func Test_Register(t *testing.T) {
 				CountryCode:     "CAN",
 			},
 			mockSetup: func(u *mocks.MockUserRepo, c *mocks.MockCountryRepo) {},
-			expErr:    service.ErrValidationFailed,
+			expErr:    &service.ErrVldFailed{},
 			wantErr:   true,
 		},
 		{
@@ -408,7 +410,7 @@ func Test_Register(t *testing.T) {
 				CountryCode:     "CANA",
 			},
 			mockSetup: func(u *mocks.MockUserRepo, c *mocks.MockCountryRepo) {},
-			expErr:    service.ErrValidationFailed,
+			expErr:    &service.ErrVldFailed{},
 			wantErr:   true,
 		},
 		{
@@ -422,7 +424,7 @@ func Test_Register(t *testing.T) {
 				CountryCode:     "can",
 			},
 			mockSetup: func(u *mocks.MockUserRepo, c *mocks.MockCountryRepo) {},
-			expErr:    service.ErrValidationFailed,
+			expErr:    &service.ErrVldFailed{},
 			wantErr:   true,
 		},
 		{
@@ -475,7 +477,7 @@ func Test_Register(t *testing.T) {
 			resp, err := srv.Register(context.Background(), tc.inp)
 
 			if tc.wantErr {
-				assert.ErrorIs(t, err, tc.expErr)
+				ErrorTestHelper(t, err, tc.expErr)
 			} else {
 				assert.NoError(t, err)
 				assert.NotNil(t, resp)
@@ -583,7 +585,7 @@ func Test_Login(t *testing.T) {
 				Username: "johndoe",
 				Password: "",
 			},
-			expErr:  service.ErrValidationFailed,
+			expErr:  &service.ErrVldFailed{},
 			wantErr: true,
 		},
 		{
@@ -616,7 +618,7 @@ func Test_Login(t *testing.T) {
 			resp, err := srv.Login(context.Background(), tc.inp)
 
 			if tc.wantErr {
-				assert.ErrorIs(t, err, tc.expErr)
+				ErrorTestHelper(t, err, tc.expErr)
 				assert.Nil(t, resp)
 			} else {
 				assert.NotNil(t, resp)
@@ -637,5 +639,13 @@ func Test_Login(t *testing.T) {
 
 			userRepo.AssertExpectations(t)
 		})
+	}
+}
+
+func ErrorTestHelper(t *testing.T, err, expectedErr error) {
+	t.Helper()
+
+	if !errors.Is(err, expectedErr) && !(reflect.TypeOf(err) == reflect.TypeOf(expectedErr)) {
+		t.Errorf("want: %v, got: %v", expectedErr, err)
 	}
 }
