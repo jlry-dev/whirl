@@ -33,10 +33,14 @@ func main() {
 	authSrv := service.NewAuthService(srvConfig.Validate, userRepository, countryRepository, dbPool)
 	userSrv := service.NewUserService(srvConfig.Logger, userRepository, avatarRepository, dbPool)
 
+	hub := handler.NewHub(srvConfig.Logger)
+	go hub.Run() // Start Hub work
+
 	// Handler
 	rspHandler := handler.NewResponseHandler(srvConfig.Logger)
 	authHandlr := handler.NewAuthHandler(authSrv, rspHandler, srvConfig.Logger)
 	userHandlr := handler.NewUserHandler(userSrv, srvConfig.Logger)
+	chatHandlr := handler.NewChatHandler(srvConfig.Logger, rspHandler, hub)
 
 	// Middleware
 	m := middleware.NewMiddleware(rspHandler, srvConfig.Logger)
@@ -50,6 +54,9 @@ func main() {
 
 	// User
 	mux.HandleFunc("POST /user/avatar", m.Authenticator(userHandlr.UpdateAvatar))
+
+	// Chat Matcher Worker
+	mux.HandleFunc("/websocket/connect", m.Authenticator(chatHandlr.SocketConnect))
 
 	srv_addr := os.Getenv("SERVER_ADDRESS")
 	srv := http.Server{
