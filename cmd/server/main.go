@@ -28,12 +28,14 @@ func main() {
 	userRepository := repository.NewUserRepository()
 	avatarRepository := repository.NewAvatarRepository()
 	countryRepository := repository.NewCountryRepository()
+	friendshipRepository := repository.NewFriendshipRepository()
 
 	// Services
 	authSrv := service.NewAuthService(srvConfig.Validate, userRepository, countryRepository, dbPool)
 	userSrv := service.NewUserService(srvConfig.Logger, userRepository, avatarRepository, dbPool)
+	frSrv := service.NewFriendshipService(*srvConfig.Validate, srvConfig.Logger, friendshipRepository, &userRepository, dbPool)
 
-	hub := handler.NewHub(srvConfig.Logger)
+	hub := handler.NewHub(frSrv, srvConfig.Logger)
 	go hub.Run() // Start Hub work
 
 	// Handler
@@ -41,6 +43,7 @@ func main() {
 	authHandlr := handler.NewAuthHandler(authSrv, rspHandler, srvConfig.Logger)
 	userHandlr := handler.NewUserHandler(userSrv, srvConfig.Logger)
 	chatHandlr := handler.NewChatHandler(srvConfig.Logger, rspHandler, hub)
+	frHandlr := handler.NewFriendshipHandler(srvConfig.Logger, rspHandler, frSrv)
 
 	// Middleware
 	m := middleware.NewMiddleware(rspHandler, srvConfig.Logger)
@@ -54,6 +57,10 @@ func main() {
 
 	// User
 	mux.HandleFunc("POST /user/avatar", m.Authenticator(userHandlr.UpdateAvatar))
+
+	// Friendship
+	mux.HandleFunc("DELETE /friend", m.Authenticator(frHandlr.RemoveFriend))
+	mux.HandleFunc("PUT /friend", m.Authenticator(frHandlr.UpdateFriendshipStatus))
 
 	// Chat Matcher Worker
 	mux.HandleFunc("/websocket/connect", m.Authenticator(chatHandlr.SocketConnect))

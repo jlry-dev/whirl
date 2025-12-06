@@ -13,6 +13,7 @@ type UserRepository interface {
 	CreateUser(ctx context.Context, qr Queryer, user *model.User) (id int, err error)
 	UpdateAvatar(ctx context.Context, qr Queryer, user *model.User) (err error)
 	GetUserWithCountryByUsername(ctx context.Context, qr Queryer, username string) (*dto.UserWithCountryDTO, error)
+	CheckUsers(ctx context.Context, qr Queryer, userIDs ...int) (bool, error)
 }
 
 type AvatarRepository interface {
@@ -22,6 +23,13 @@ type AvatarRepository interface {
 
 type CountryRepository interface {
 	GetIDByISO(ctx context.Context, qr Queryer, iso string) (id int, err error)
+}
+
+type FriendshipRepository interface {
+	CreateFriendship(ctx context.Context, qr Queryer, fr *model.Friendship) error
+	DeleteFriendship(ctx context.Context, qr Queryer, fr *model.Friendship) error
+	UpdateFriendshipStatus(ctx context.Context, qr Queryer, fr *model.Friendship) error
+	CheckRelationship(ctx context.Context, qr Queryer, fr *model.Friendship) (bool, error)
 }
 
 type Queryer interface {

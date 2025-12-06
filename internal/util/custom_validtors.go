@@ -110,6 +110,8 @@ func GetValidationMessage(e validator.FieldError) string {
 		return fmt.Sprintf("age must be atleast %s", e.Param())
 	case "iso3166_1_alpha3":
 		return "country code must be in the correct format (iso3166-1)"
+	case "oneof":
+		return fmt.Sprintf("must have have one of these values %s", e.Param())
 	default:
 		return "invalid field value"
 	}

@@ -35,12 +35,14 @@ func (h *AuthHandlr) RegisterHandler(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	if r.Method != http.MethodPost {
+		h.logger.Error("register invalid http method", slog.String("METHOD", r.Method), slog.String("PATH", r.URL.Path))
 		h.rspHandler.Error(w, http.StatusMethodNotAllowed, http.StatusText(http.StatusMethodNotAllowed), nil)
 		return
 	}
 
 	typeHeader := strings.Split(r.Header.Get("Content-Type"), ";")
 	if typeHeader[0] != "application/json" {
+		h.logger.Error("register unsupported media format", slog.String("METHOD", r.Method), slog.String("PATH", r.URL.Path))
 		h.rspHandler.Error(w, http.StatusUnsupportedMediaType, http.StatusText(http.StatusUnsupportedMediaType), nil)
 		return
 	}
@@ -50,7 +52,7 @@ func (h *AuthHandlr) RegisterHandler(w http.ResponseWriter, r *http.Request) {
 	err := json.NewDecoder(r.Body).Decode(data)
 	if err != nil {
 		h.logger.Error(err.Error(), slog.String("METHOD", r.Method), slog.String("PATH", r.URL.Path))
-		h.rspHandler.Error(w, http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError), nil)
+		h.rspHandler.Error(w, http.StatusBadRequest, http.StatusText(http.StatusBadRequest), nil)
 		return
 	}
 
@@ -88,12 +90,14 @@ func (h *AuthHandlr) LoginHandler(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	if r.Method != http.MethodPost {
+		h.logger.Error("login invalid http method", slog.String("METHOD", r.Method), slog.String("PATH", r.URL.Path))
 		h.rspHandler.Error(w, http.StatusMethodNotAllowed, http.StatusText(http.StatusMethodNotAllowed), nil)
 		return
 	}
 
 	typeHeader := strings.Split(r.Header.Get("Content-Type"), ";")
 	if typeHeader[0] != "application/json" {
+		h.logger.Error("login unsupported media format", slog.String("METHOD", r.Method), slog.String("PATH", r.URL.Path))
 		h.rspHandler.Error(w, http.StatusUnsupportedMediaType, http.StatusText(http.StatusUnsupportedMediaType), nil)
 		return
 	}
@@ -102,7 +106,7 @@ func (h *AuthHandlr) LoginHandler(w http.ResponseWriter, r *http.Request) {
 
 	if err := json.NewDecoder(r.Body).Decode(data); err != nil {
 		h.logger.Error(err.Error(), slog.String("METHOD", r.Method), slog.String("PATH", r.URL.Path))
-		h.rspHandler.Error(w, http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError), nil)
+		h.rspHandler.Error(w, http.StatusBadRequest, http.StatusText(http.StatusBadRequest), nil)
 		return
 	}
 

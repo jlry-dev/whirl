@@ -37,6 +37,8 @@ func (h *UserHandlr) UpdateAvatar(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	if r.Method != http.MethodPost {
+		h.logger.Error("avatar update: invalid http method", slog.String("METHOD", r.Method), slog.String("PATH", r.URL.Path))
+
 		h.rsp.Error(w, http.StatusMethodNotAllowed, http.StatusText(http.StatusMethodNotAllowed), nil)
 		return
 	}
@@ -44,6 +46,7 @@ func (h *UserHandlr) UpdateAvatar(w http.ResponseWriter, r *http.Request) {
 	// Separate the content type and the content type parameter
 	typeHeader := strings.Split(r.Header.Get("Content-Type"), ";")
 	if typeHeader[0] != "multipart/form-data" {
+		h.logger.Error("avatar update: invalid content type", slog.String("METHOD", r.Method), slog.String("PATH", r.URL.Path))
 		h.rsp.Error(w, http.StatusUnsupportedMediaType, http.StatusText(http.StatusUnsupportedMediaType), nil)
 		return
 	}

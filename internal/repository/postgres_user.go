@@ -14,7 +14,7 @@ import (
 
 var (
 	ErrDuplicateUser = errors.New("repo: duplicate user")
-	ErrNoRowsFound   = errors.New("repo: no user exist")
+	ErrNoRowsFound   = errors.New("repo: no rows exist")
 )
 
 type UserRepo struct{}
@@ -71,4 +71,40 @@ func (r *UserRepo) GetUserWithCountryByUsername(ctx context.Context, qr Queryer,
 	}
 
 	return userInfo, nil
+}
+
+/*
+ Checks if a slice of given userIDs is present in the database
+
+This is mainly used for checks like when adding friend where we check if the users exists
+*/
+
+func (r *UserRepo) CheckUsers(ctx context.Context, qr Queryer, userIDs ...int) (bool, error) {
+	if len(userIDs) == 0 {
+		panic("repo: empty userID on check users")
+	}
+	// Check if users exist
+	chkQry := `SELECT id FROM app_user WHERE id = ANY($1)`
+	rows, err := qr.Query(ctx, chkQry, userIDs)
+	if err != nil {
+		return false, fmt.Errorf("repo: query failed: %w", err)
+	}
+	defer rows.Close()
+
+	var n int // Counter to compare how many were selected on the query
+	for rows.Next() {
+		var id int
+		if err := rows.Scan(&id); err != nil {
+			return false, fmt.Errorf("repo: scan failed: %w", err)
+		}
+
+		n = n + 1
+	}
+
+	if err := rows.Err(); err != nil {
+		return false, fmt.Errorf("repo: rows error: %w", err)
+	}
+
+	// Compare the queried records to the ID's wanted to check
+	return n == len(userIDs), nil
 }
