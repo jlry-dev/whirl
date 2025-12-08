@@ -97,6 +97,7 @@ type Client struct {
 
 type Hub struct {
 	frSrv  service.FriendshipService
+	msgSrv service.MesssageService
 	logger *slog.Logger
 
 	clientMU       sync.RWMutex
@@ -352,12 +353,37 @@ func (h *Hub) HandleMessage(m *Message) {
 	switch m.Type {
 	case "direct_message":
 		h.clientMU.RLock()
-		defer h.clientMU.RUnlock()
+		client, ok := h.clients[strconv.Itoa(m.From)]
+		if !ok {
+			// the client is offline
+			return
+		}
+		h.clientMU.RUnlock()
 
-		if receiver, online := h.clients[strconv.Itoa(m.To)]; !online {
-			// receiver is offline
-			// save to database
-		} else {
+		// save to database
+		// WARN: again we need to properly create a context with proper deadline
+		err := h.msgSrv.StoreMessage(context.Background(), m.From, m.To, m.Content)
+		if err != nil {
+			h.logger.Error("direct message error : failed to store message")
+
+			// This is an error because it should have been
+			select {
+			case client.send <- &Message{
+				Type:    "error",
+				Code:    "SEND_MESSAGE_FAILED",
+				Content: "Random pair has disconnected",
+			}:
+			default:
+				// ignore on fail
+			}
+
+			return
+		}
+
+		h.clientMU.RLock()
+		receiver, online := h.clients[strconv.Itoa(m.To)]
+		h.clientMU.RUnlock()
+		if online {
 			// save to database
 			select {
 			case receiver.send <- m:

@@ -32,6 +32,11 @@ type FriendshipRepository interface {
 	CheckRelationship(ctx context.Context, qr Queryer, fr *model.Friendship) (bool, error)
 }
 
+type MessageRepository interface {
+	CreateMessage(ctx context.Context, qr Queryer, ch *model.Message) error
+	GetMessages(ctx context.Context, qr Queryer, uidOne, uidTwo int) ([]*model.Message, error)
+}
+
 type Queryer interface {
 	Exec(ctx context.Context, query string, args ...any) (commandTag pgconn.CommandTag, err error)
 	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
