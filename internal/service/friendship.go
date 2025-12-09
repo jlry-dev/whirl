@@ -20,6 +20,7 @@ type FriendshipService interface {
 	AddFriend(context.Context, *dto.FriendshipDTO) error
 	RemoveFriend(context.Context, *dto.FriendshipDTO) (*dto.FrienshipServiceSuccessDTO, error)
 	UpdateFriendshipStatus(context.Context, *dto.FriendshipDTO) (*dto.FrienshipServiceSuccessDTO, error)
+	RetrieveFriends(ctx context.Context, userID, page int) (*dto.FriendsDetailsResponse, error)
 	CheckStatus(context.Context, *dto.FriendshipDTO) (bool, error)
 }
 
@@ -136,6 +137,17 @@ func (srv *FriendshipSrv) UpdateFriendshipStatus(ctx context.Context, data *dto.
 
 	return &dto.FrienshipServiceSuccessDTO{
 		Message: "Successfully updated friendship status",
+	}, nil
+}
+
+func (srv *FriendshipSrv) RetrieveFriends(ctx context.Context, userID, page int) (*dto.FriendsDetailsResponse, error) {
+	friends, err := srv.frRepo.GetFriends(ctx, srv.db, userID, page)
+	if err != nil {
+		return nil, fmt.Errorf("service: failed to retrieve friends: %w", err)
+	}
+
+	return &dto.FriendsDetailsResponse{
+		Friends: friends,
 	}, nil
 }
 

@@ -29,12 +29,13 @@ type FriendshipRepository interface {
 	CreateFriendship(ctx context.Context, qr Queryer, fr *model.Friendship) error
 	DeleteFriendship(ctx context.Context, qr Queryer, fr *model.Friendship) error
 	UpdateFriendshipStatus(ctx context.Context, qr Queryer, fr *model.Friendship) error
+	GetFriends(ctx context.Context, qr Queryer, userID, page int) ([]*dto.FriendDetails, error)
 	CheckRelationship(ctx context.Context, qr Queryer, fr *model.Friendship) (bool, error)
 }
 
 type MessageRepository interface {
 	CreateMessage(ctx context.Context, qr Queryer, ch *model.Message) error
-	GetMessages(ctx context.Context, qr Queryer, uidOne, uidTwo int) ([]*model.Message, error)
+	GetMessages(ctx context.Context, qr Queryer, uidOne, uidTwo, page int) ([]*model.Message, error)
 }
 
 type Queryer interface {

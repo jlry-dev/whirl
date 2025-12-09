@@ -97,7 +97,7 @@ type Client struct {
 
 type Hub struct {
 	frSrv  service.FriendshipService
-	msgSrv service.MesssageService
+	msgSrv service.MessageService
 	logger *slog.Logger
 
 	clientMU       sync.RWMutex
@@ -132,11 +132,12 @@ func NewHub(frSrv service.FriendshipService, logger *slog.Logger) *Hub {
 }
 
 type Message struct {
-	Type    string `json:"type"`
-	From    int    `json:"from,omitempty"`
-	To      int    `json:"to,omitempty"`
-	Code    string `json:"code,omitempty"` // This is used for error codes
-	Content string `json:"content,omitempty"`
+	Type      string    `json:"type"`
+	From      int       `json:"from,omitempty"`
+	To        int       `json:"to,omitempty"`
+	Code      string    `json:"code,omitempty"` // This is used for error codes
+	Content   string    `json:"content,omitempty"`
+	Timestamp time.Time `json:"timestamp"`
 }
 
 func (h *Hub) Run() {
@@ -360,9 +361,10 @@ func (h *Hub) HandleMessage(m *Message) {
 		}
 		h.clientMU.RUnlock()
 
+		m.Timestamp = time.Now()
 		// save to database
 		// WARN: again we need to properly create a context with proper deadline
-		err := h.msgSrv.StoreMessage(context.Background(), m.From, m.To, m.Content)
+		err := h.msgSrv.StoreMessage(context.Background(), m.From, m.To, m.Content, m.Timestamp)
 		if err != nil {
 			h.logger.Error("direct message error : failed to store message")
 

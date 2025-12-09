@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/jlry-dev/whirl/internal/model/dto"
@@ -14,6 +15,7 @@ import (
 type FriendshipHandler interface {
 	RemoveFriend(w http.ResponseWriter, r *http.Request)
 	UpdateFriendshipStatus(w http.ResponseWriter, r *http.Request)
+	RetrieveFriends(w http.ResponseWriter, r *http.Request)
 }
 
 type FriendshipHandlr struct {
@@ -147,4 +149,53 @@ func (h *FriendshipHandlr) UpdateFriendshipStatus(w http.ResponseWriter, r *http
 
 	rspData.Status = http.StatusOK
 	h.rspHandler.JSON(w, http.StatusOK, rspData)
+}
+
+func (h *FriendshipHandlr) RetrieveFriends(w http.ResponseWriter, r *http.Request) {
+	defer r.Body.Close()
+	ctx := r.Context()
+
+	if r.Method != http.MethodPut {
+		h.logger.Error("remove friend: invalid http method", slog.String("METHOD", r.Method), slog.String("PATH", r.URL.Path))
+		h.rspHandler.Error(w, http.StatusMethodNotAllowed, http.StatusText(http.StatusMethodNotAllowed), nil)
+		return
+	}
+
+	typeHeader := strings.Split(r.Header.Get("Content-Type"), ";")
+	if typeHeader[0] != "application/json" {
+		h.logger.Error("remove friend unsupported media format", slog.String("METHOD", r.Method), slog.String("PATH", r.URL.Path))
+		h.rspHandler.Error(w, http.StatusUnsupportedMediaType, http.StatusText(http.StatusUnsupportedMediaType), nil)
+		return
+	}
+
+	userID, ok := ctx.Value("userID").(int)
+	if !ok {
+		h.logger.Error("handler: failed to get the userID value out of ctx", slog.String("METHOD", r.Method), slog.String("PATH", r.URL.Path))
+		h.rspHandler.Error(w, http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError), nil)
+		return
+	}
+
+	page, err := strconv.Atoi(r.URL.Query().Get("page"))
+	if err != nil {
+		h.logger.Error("retrieve message: failed to convert page to int", slog.String("METHOD", r.Method), slog.String("PATH", r.URL.Path))
+
+		h.rspHandler.Error(w, http.StatusBadRequest, http.StatusText(http.StatusBadRequest), nil)
+		return
+	}
+
+	if page == 0 {
+		// default
+		page = 1
+	}
+
+	dto, err := h.frSrv.RetrieveFriends(ctx, userID, page)
+	if err != nil {
+		h.logger.Error("retrieve message: invalid http method", slog.String("METHOD", r.Method), slog.String("PATH", r.URL.Path))
+
+		h.rspHandler.Error(w, http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError), nil)
+		return
+	}
+
+	dto.Status = http.StatusOK
+	h.rspHandler.JSON(w, http.StatusOK, dto)
 }

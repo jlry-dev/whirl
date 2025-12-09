@@ -23,10 +23,15 @@ func (r *MessageRepo) CreateMessage(ctx context.Context, qr Queryer, ch *model.M
 	return nil
 }
 
-func (r *MessageRepo) GetMessages(ctx context.Context, qr Queryer, uidOne, uidTwo int) ([]*model.Message, error) {
-	qry := `SELECT sender_id, receiver_id, content, timestamp FROM messages as m WHERE (m.sender_id = $1 AND m.receiver_id = $2) OR (m.sender_id = $2 AND m.receiver_id = $1)`
+func (r *MessageRepo) GetMessages(ctx context.Context, qr Queryer, uidOne, uidTwo, page int) ([]*model.Message, error) {
+	qry := `SELECT sender_id, receiver_id, content, timestamp 
+		FROM messages as m 
+		WHERE (m.sender_id = $1 AND m.receiver_id = $2) OR (m.sender_id = $2 AND m.receiver_id = $1)
+		ORDER BY m.timestamp
+		LIMIT = $3`
 
-	rows, err := qr.Query(ctx, qry, uidOne, uidTwo)
+	p := 10 * page
+	rows, err := qr.Query(ctx, qry, uidOne, uidTwo, p)
 	if err != nil {
 		return nil, fmt.Errorf("repo: failed to get messages : %w", err)
 	}

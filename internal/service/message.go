@@ -12,9 +12,9 @@ import (
 	"github.com/jlry-dev/whirl/internal/repository"
 )
 
-type MesssageService interface {
-	StoreMessage(ctx context.Context, sender int, receiver int, content string) error
-	RetreiveMessages(ctx context.Context, participantOne, participantTwo int) (*dto.MessagesDTO, error)
+type MessageService interface {
+	StoreMessage(ctx context.Context, sender int, receiver int, content string, timestamp time.Time) error
+	RetreiveMessages(ctx context.Context, participantOne, participantTwo, page int) (*dto.MessagesDTO, error)
 }
 
 type MessageSrv struct {
@@ -23,12 +23,20 @@ type MessageSrv struct {
 	db      *pgxpool.Pool
 }
 
-func (srv *MessageSrv) StoreMessage(ctx context.Context, senderID int, receiverID int, content string) error {
+func NewMessageService(logger *slog.Logger, msgRepo repository.MessageRepository, db *pgxpool.Pool) MessageService {
+	return &MessageSrv{
+		logger:  logger,
+		msgRepo: msgRepo,
+		db:      db,
+	}
+}
+
+func (srv *MessageSrv) StoreMessage(ctx context.Context, senderID int, receiverID int, content string, timestamp time.Time) error {
 	m := &model.Message{
 		SenderID:   senderID,
 		ReceiverID: receiverID,
 		Content:    content,
-		Timestamp:  time.Now(),
+		Timestamp:  timestamp,
 	}
 
 	err := srv.msgRepo.CreateMessage(ctx, srv.db, m)
@@ -39,8 +47,8 @@ func (srv *MessageSrv) StoreMessage(ctx context.Context, senderID int, receiverI
 	return nil
 }
 
-func (srv *MessageSrv) RetreiveMessages(ctx context.Context, participantOne, participantTwo int) (*dto.MessagesDTO, error) {
-	messages, err := srv.msgRepo.GetMessages(ctx, srv.db, participantOne, participantTwo)
+func (srv *MessageSrv) RetreiveMessages(ctx context.Context, participantOne, participantTwo, page int) (*dto.MessagesDTO, error) {
+	messages, err := srv.msgRepo.GetMessages(ctx, srv.db, participantOne, participantTwo, page)
 	if err != nil {
 		return nil, fmt.Errorf("service: failed to retrieve messages : %w", err)
 	}
