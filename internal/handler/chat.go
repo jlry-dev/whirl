@@ -224,6 +224,8 @@ func (h *Hub) JoinRandom(c *Client) {
 	}
 
 	h.queueMU.Lock()
+	defer h.queueMU.Unlock()
+
 	if len(h.queue) > 0 {
 		pair := h.queue[0]
 		h.queue = h.queue[1:]
@@ -249,7 +251,7 @@ func (h *Hub) JoinRandom(c *Client) {
 			To:   pair.userID.Int(),
 		})
 		if err != nil {
-			h.logger.Error("join random: there was an error trying to check friendship status")
+			h.logger.Error("join random: there was an error trying to check friendship status", slog.String("error", err.Error()))
 			pair.mu.RUnlock()
 			c.mu.RUnlock()
 
@@ -298,7 +300,6 @@ func (h *Hub) JoinRandom(c *Client) {
 	c.mu.Lock()
 	if c.inQueue || c.randomPair != nil {
 		c.mu.Unlock()
-		h.queueMU.Unlock()
 		return
 	}
 
@@ -306,7 +307,6 @@ func (h *Hub) JoinRandom(c *Client) {
 	h.queue = append(h.queue, c)
 
 	c.mu.Unlock()
-	h.queueMU.Unlock()
 }
 
 func (h *Hub) LeaveRandom(c *Client) {
@@ -332,6 +332,7 @@ func (h *Hub) LeaveRandom(c *Client) {
 			Type:    "notification",
 			Content: "random_pair_left",
 		}:
+			// sent successfully
 		default:
 			h.logger.Info("random_leave: notification dropped: pair already disconnected")
 		}
