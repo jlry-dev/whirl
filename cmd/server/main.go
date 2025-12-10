@@ -71,9 +71,12 @@ func main() {
 	// Chat Matcher Worker
 	mux.HandleFunc("/websocket/connect", m.Authenticator(chatHandlr.SocketConnect))
 
+	// Add middlewares to every request
+	multiplexer := m.CorsMiddleware(mux)
+
 	srv_addr := os.Getenv("SERVER_ADDRESS")
 	srv := http.Server{
-		Handler:  mux,
+		Handler:  multiplexer,
 		Addr:     srv_addr,
 		ErrorLog: slog.NewLogLogger(srvConfig.Logger.Handler(), slog.LevelError),
 	}

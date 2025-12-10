@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 
@@ -15,6 +16,7 @@ import (
 
 type Middleware interface {
 	Authenticator(next http.HandlerFunc) http.HandlerFunc
+	CorsMiddleware(next http.Handler) http.Handler
 }
 
 type middlewareStruct struct {
@@ -69,4 +71,25 @@ func (m *middlewareStruct) Authenticator(next http.HandlerFunc) http.HandlerFunc
 		r2 := r.WithContext(nCtx)
 		next(w, r2)
 	}
+}
+
+func (m *middlewareStruct) CorsMiddleware(next http.Handler) http.Handler {
+	frontend_url := os.Getenv("FRONTEND_ADDRESS")
+	if frontend_url == "" {
+		panic("cors middleware: frontend_url missing")
+	}
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", frontend_url)
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		w.Header().Set("Access-Control-Max-Age", "86400")
+
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
 }

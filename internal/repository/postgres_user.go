@@ -59,10 +59,14 @@ func (r *UserRepo) UpdateAvatar(ctx context.Context, qr Queryer, user *model.Use
 }
 
 func (r *UserRepo) GetUserWithCountryByUsername(ctx context.Context, qr Queryer, username string) (*dto.UserWithCountryDTO, error) {
-	qry := `SELECT u.id, u.username, u.email, u.password, u.bio, u.bdate, c.iso_code_3, c.name FROM "app_user" AS u JOIN "country" AS c ON u.country_id = c.id WHERE u.username = $1`
+	qry := `SELECT u.id, u.username, u.email, u.password, u.bio, u.bdate, c.iso_code_3, c.name, a.url
+		FROM "app_user" AS u
+		JOIN "country" AS c ON u.country_id = c.id
+		LEFT JOIN avatar AS a ON u.avatar_id = a.id
+		WHERE u.username = $1`
 
 	userInfo := new(dto.UserWithCountryDTO)
-	if err := qr.QueryRow(ctx, qry, username).Scan(&userInfo.ID, &userInfo.Username, &userInfo.Email, &userInfo.Password, &userInfo.Bio, &userInfo.Bdate, &userInfo.CountryCode, &userInfo.CountryName); err != nil {
+	if err := qr.QueryRow(ctx, qry, username).Scan(&userInfo.ID, &userInfo.Username, &userInfo.Email, &userInfo.Password, &userInfo.Bio, &userInfo.Bdate, &userInfo.CountryCode, &userInfo.CountryName, &userInfo.AvatarURL); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNoRowsFound
 		}

@@ -22,6 +22,7 @@ type UserWithCountryDTO struct {
 	Password    string    `json:"-"`
 	Bio         string    `json:"bio,omitempty"`
 	Bdate       time.Time `json:"birthdate"`
+	AvatarURL   string    `json:"avatar_url"`
 	CountryCode string    `json:"country-code,omitempty"`
 	CountryName string    `json:"country-name,omitempty"`
 }

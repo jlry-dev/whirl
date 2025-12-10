@@ -67,7 +67,7 @@ func (f *FriendshipRepo) UpdateFriendshipStatus(ctx context.Context, qr Queryer,
 }
 
 func (f *FriendshipRepo) GetFriends(ctx context.Context, qr Queryer, userID, page int) ([]*dto.FriendDetails, error) {
-	qry := `SELECT au.id, au.username, au.bio, au.bdate, a.public_url, c.name AS country_name, c.iso_code_3
+	qry := `SELECT au.id, au.username, au.bio, au.bdate, a.url, c.name AS country_name, c.iso_code_3
 		FROM app_user AS au
 		LEFT JOIN avatar AS a ON au.avatar_id = a.id
 		LEFT JOIN country AS c ON au.country_id = c.id

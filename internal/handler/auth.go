@@ -114,6 +114,13 @@ func (h *AuthHandlr) LoginHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		h.logger.Error(err.Error(), slog.String("METHOD", r.Method), slog.String("PATH", r.URL.Path))
 
+		vldErrs, ok := err.(*service.ErrVldFailed)
+		if ok {
+			// This means that the err is of type ErrVldFailed
+			h.rspHandler.Error(w, http.StatusBadRequest, "failed to validate data", vldErrs.Fields)
+			return
+		}
+
 		if errors.Is(err, service.ErrNoUserExist) {
 			h.rspHandler.Error(w, http.StatusUnauthorized, "no user found", nil)
 			return
