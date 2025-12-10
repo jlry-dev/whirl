@@ -108,7 +108,7 @@ func (f *FriendshipRepo) GetFriends(ctx context.Context, qr Queryer, userID, pag
 }
 
 func (f *FriendshipRepo) CheckRelationship(ctx context.Context, qr Queryer, fr *model.Friendship) (bool, error) {
-	qry := `SELECT (id) FROM "friendship" as f WHERE (f.user1_id = $2 AND f.user2_id = $3) OR (f.user1_id = $3 AND f.user2_id = $2)`
+	qry := `SELECT status FROM "friendship" as f WHERE (f.user1_id = $1 AND f.user2_id = $2) OR (f.user1_id = $2 AND f.user2_id = $1)`
 
 	result, err := qr.Exec(ctx, qry, fr.UID_1, fr.UID_2)
 	if err != nil {
