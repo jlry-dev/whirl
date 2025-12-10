@@ -250,23 +250,23 @@ func (h *Hub) JoinRandom(c *Client) {
 		})
 		if err != nil {
 			h.logger.Error("join random: there was an error trying to check friendship status")
-			pair.mu.Unlock()
-			c.mu.Unlock()
+			pair.mu.RUnlock()
+			c.mu.RUnlock()
 
 			return
 		}
 
 		if hasRelationship {
 			// they are in a relationship so we we put both of them back into the queue
-			pair.mu.Unlock()
-			c.mu.Unlock()
+			pair.mu.RUnlock()
+			c.mu.RUnlock()
 
 			h.randomJoin <- pair
 			h.randomJoin <- c
 		}
 
-		pair.mu.Unlock()
-		c.mu.Unlock()
+		pair.mu.RUnlock()
+		c.mu.RUnlock()
 
 		c.mu.Lock()
 		pair.mu.Lock()

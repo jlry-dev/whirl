@@ -31,19 +31,52 @@ func NewMiddleware(rsp *handler.ResponseHandler, logger *slog.Logger) Middleware
 	}
 }
 
+func (m *middlewareStruct) CorsMiddleware(next http.Handler) http.Handler {
+	frontend_url := os.Getenv("FRONTEND_ADDRESS")
+	if frontend_url == "" {
+		panic("cors middleware: frontend_url missing")
+	}
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", frontend_url)
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		w.Header().Set("Access-Control-Max-Age", "86400")
+
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
 func (m *middlewareStruct) Authenticator(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
+
+		var tokenStr string
+
 		authHeader := r.Header.Get("Authorization")
 		bearerSlice := strings.Fields(authHeader)
 
 		if len(bearerSlice) < 2 || len(bearerSlice) > 2 || bearerSlice[0] != "Bearer" {
-			m.rsp.Error(w, http.StatusUnauthorized, "invalid token", nil)
-			return
+			// Check for websockets fallback
+			wsToken := r.URL.Query().Get("token")
+
+			if wsToken == "" {
+				m.rsp.Error(w, http.StatusUnauthorized, "invalid token", nil)
+				return
+			}
+
+			tokenStr = wsToken
+		} else {
+			tokenStr = bearerSlice[1]
 		}
 
 		// parse the claims of the token
-		token, err := util.ParseJWT(ctx, bearerSlice[1])
+		token, err := util.ParseJWT(ctx, tokenStr)
 		if err != nil {
 			m.logger.Error(err.Error(), slog.String("METHOD", r.Method), slog.String("PATH", r.URL.Path))
 			if errors.Is(err, jwt.ErrTokenExpired) {
@@ -71,25 +104,4 @@ func (m *middlewareStruct) Authenticator(next http.HandlerFunc) http.HandlerFunc
 		r2 := r.WithContext(nCtx)
 		next(w, r2)
 	}
-}
-
-func (m *middlewareStruct) CorsMiddleware(next http.Handler) http.Handler {
-	frontend_url := os.Getenv("FRONTEND_ADDRESS")
-	if frontend_url == "" {
-		panic("cors middleware: frontend_url missing")
-	}
-
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", frontend_url)
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-		w.Header().Set("Access-Control-Max-Age", "86400")
-
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusOK)
-			return
-		}
-
-		next.ServeHTTP(w, r)
-	})
 }
