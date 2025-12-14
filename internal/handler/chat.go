@@ -115,9 +115,10 @@ type Hub struct {
 	randomLeave chan *Client
 }
 
-func NewHub(frSrv service.FriendshipService, logger *slog.Logger) *Hub {
+func NewHub(frSrv service.FriendshipService, msgSrv service.MessageService, logger *slog.Logger) *Hub {
 	return &Hub{
-		frSrv: frSrv,
+		frSrv:  frSrv,
+		msgSrv: msgSrv,
 
 		logger:         logger,
 		clients:        make(map[string]*Client, 32),

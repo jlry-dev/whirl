@@ -38,7 +38,7 @@ func main() {
 	frSrv := service.NewFriendshipService(*srvConfig.Validate, srvConfig.Logger, friendshipRepository, &userRepository, dbPool)
 	msgSrv := service.NewMessageService(srvConfig.Logger, messageRepository, dbPool)
 
-	hub := handler.NewHub(frSrv, srvConfig.Logger)
+	hub := handler.NewHub(frSrv, msgSrv, srvConfig.Logger)
 	go hub.Run() // Start Hub work
 
 	// Handler
