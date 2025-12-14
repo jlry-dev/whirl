@@ -27,7 +27,7 @@ func (r *MessageRepo) GetMessages(ctx context.Context, qr Queryer, uidOne, uidTw
 	qry := `SELECT sender_id, receiver_id, content, timestamp 
 		FROM message as m 
 		WHERE (m.sender_id = $1 AND m.receiver_id = $2) OR (m.sender_id = $2 AND m.receiver_id = $1)
-		ORDER BY m.timestamp
+		ORDER BY m.timestamp DESC
 		LIMIT $3`
 
 	p := 10 * page
