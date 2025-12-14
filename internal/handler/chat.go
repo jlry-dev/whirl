@@ -323,6 +323,7 @@ func (h *Hub) LeaveRandom(c *Client) {
 	pair := c.randomPair
 	c.mu.RUnlock()
 
+	h.logger.Info("user is leaving random queue", slog.String("user", c.userID.String()))
 	// If the user has a pair then
 	// we clear the pair's random pair field
 
@@ -351,6 +352,10 @@ func (h *Hub) LeaveRandom(c *Client) {
 
 	// not paired so we leave the queue
 	h.queueMU.Lock()
+	c.mu.Lock()
+	c.inQueue = false
+	c.mu.Unlock()
+
 	for i, cl := range h.queue {
 		if c.userID == cl.userID {
 			h.queue = append(h.queue[:i], h.queue[i+1:]...)
