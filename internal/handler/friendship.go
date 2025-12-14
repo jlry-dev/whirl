@@ -111,7 +111,7 @@ func (h *FriendshipHandlr) UpdateFriendshipStatus(w http.ResponseWriter, r *http
 
 	userID, ok := ctx.Value("userID").(int)
 	if !ok {
-		h.logger.Error("remove friend: failed to get the userID value out of ctx", slog.String("METHOD", r.Method), slog.String("PATH", r.URL.Path))
+		h.logger.Error("update friendship: failed to get the userID value out of ctx", slog.String("METHOD", r.Method), slog.String("PATH", r.URL.Path))
 		h.rspHandler.Error(w, http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError), nil)
 		return
 	}
@@ -129,7 +129,7 @@ func (h *FriendshipHandlr) UpdateFriendshipStatus(w http.ResponseWriter, r *http
 
 	rspData, err := h.frSrv.UpdateFriendshipStatus(ctx, data)
 	if err != nil {
-		h.logger.Error("retrieve friends: ", slog.String("METHOD", r.Method), slog.String("PATH", r.URL.Path))
+		h.logger.Error(err.Error(), slog.String("METHOD", r.Method), slog.String("PATH", r.URL.Path))
 
 		vldErrs, ok := err.(*service.ErrVldFailed)
 		if ok {

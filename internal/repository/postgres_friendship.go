@@ -52,11 +52,13 @@ func (f *FriendshipRepo) DeleteFriendship(ctx context.Context, qr Queryer, fr *m
 }
 
 func (f *FriendshipRepo) UpdateFriendshipStatus(ctx context.Context, qr Queryer, fr *model.Friendship) error {
-	qry := `UPDATE "friendship" as f SET f.status = $1 WHERE (f.user1_id = $2 AND f.user2_id = $3) OR (f.user1_id = $3 AND f.user2_id = $2)`
+	qry := `UPDATE friendship
+		SET status = $1
+		WHERE (user1_id = $2 AND user2_id = $3) OR (user1_id = $3 AND user2_id = $2)`
 
-	result, err := qr.Exec(ctx, qry, fr.UID_1, fr.UID_2)
+	result, err := qr.Exec(ctx, qry, fr.Status, fr.UID_1, fr.UID_2)
 	if err != nil {
-		return fmt.Errorf("repo: failed to delete friendship : %w", err)
+		return fmt.Errorf("repo: failed to update friendship : %w", err)
 	}
 
 	if result.RowsAffected() != 1 {
@@ -74,13 +76,13 @@ func (f *FriendshipRepo) GetFriends(ctx context.Context, qr Queryer, userID, pag
 		WHERE au.id IN (
 		    SELECT f.user1_id
 		    FROM friendship f
-		    WHERE f.user2_id = $1
+		    WHERE f.user2_id = $1 AND f.status <> 'blocked'
 		    UNION
 		    SELECT f.user2_id
 		    FROM friendship f
-		    WHERE f.user1_id = $1
+		    WHERE f.user1_id = $1 AND f.status <> 'blocked'
 		LIMIT $2
-		);`
+		)`
 
 	p := 10 * page
 	rows, err := qr.Query(ctx, qry, userID, p)
