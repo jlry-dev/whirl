@@ -32,13 +32,21 @@ func NewMiddleware(rsp *handler.ResponseHandler, logger *slog.Logger) Middleware
 }
 
 func (m *middlewareStruct) CorsMiddleware(next http.Handler) http.Handler {
-	frontend_url := os.Getenv("FRONTEND_ADDRESS")
-	if frontend_url == "" {
-		panic("cors middleware: frontend_url missing")
-	}
+	frontendURL := os.Getenv("FRONTEND_ADDRESS")
+	allowAll := frontendURL == ""
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", frontend_url)
+		origin := r.Header.Get("Origin")
+
+		if allowAll {
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+		} else if origin == frontendURL {
+			w.Header().Set("Access-Control-Allow-Origin", origin) // Reflect for security
+		} else {
+			http.Error(w, "CORS origin not allowed", http.StatusForbidden)
+			return
+		}
+		w.Header().Set("Access-Control-Allow-Origin", frontendURL)
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 		w.Header().Set("Access-Control-Max-Age", "86400")
