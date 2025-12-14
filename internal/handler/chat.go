@@ -265,6 +265,7 @@ func (h *Hub) JoinRandom(c *Client) {
 
 			h.randomJoin <- pair
 			h.randomJoin <- c
+			return
 		}
 
 		pair.mu.RUnlock()
