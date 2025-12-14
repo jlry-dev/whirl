@@ -5,7 +5,7 @@ import "time"
 type FriendshipDTO struct {
 	From   int    `json:"from" validate:"required"`
 	To     int    `json:"to" validate:"required"`
-	Status string `json:"status" validate:"oneof=accepted blocked"`
+	Status string `json:"status,omitempty" validate:"omitempty,oneof=accepted blocked"`
 }
 
 type FrienshipServiceSuccessDTO struct {
