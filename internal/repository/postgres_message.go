@@ -14,7 +14,7 @@ func NewMessageRepository() MessageRepository {
 }
 
 func (r *MessageRepo) CreateMessage(ctx context.Context, qr Queryer, ch *model.Message) error {
-	qry := `INSERT INTO messages (sender_id, receiver_id, content, timestamp) VALUES ($1, $2, $3, $4)`
+	qry := `INSERT INTO message (sender_id, receiver_id, content, timestamp) VALUES ($1, $2, $3, $4)`
 
 	if _, err := qr.Exec(ctx, qry, ch.SenderID, ch.ReceiverID, ch.Content, ch.Timestamp); err != nil {
 		return fmt.Errorf("repo: failed to create message: %w", err)
@@ -25,10 +25,10 @@ func (r *MessageRepo) CreateMessage(ctx context.Context, qr Queryer, ch *model.M
 
 func (r *MessageRepo) GetMessages(ctx context.Context, qr Queryer, uidOne, uidTwo, page int) ([]*model.Message, error) {
 	qry := `SELECT sender_id, receiver_id, content, timestamp 
-		FROM messages as m 
+		FROM message as m 
 		WHERE (m.sender_id = $1 AND m.receiver_id = $2) OR (m.sender_id = $2 AND m.receiver_id = $1)
 		ORDER BY m.timestamp
-		LIMIT = $3`
+		LIMIT $3`
 
 	p := 10 * page
 	rows, err := qr.Query(ctx, qry, uidOne, uidTwo, p)

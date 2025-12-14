@@ -67,7 +67,7 @@ func main() {
 	mux.HandleFunc("PUT /friend", m.Authenticator(frHandlr.UpdateFriendshipStatus))
 	mux.HandleFunc("GET /friends", m.Authenticator(frHandlr.RetrieveFriends))
 
-	mux.HandleFunc("GET /messages/:id", m.Authenticator(msgHandlr.RetrieveMessages))
+	mux.HandleFunc("GET /messages/{id}", m.Authenticator(msgHandlr.RetrieveMessages))
 
 	// Chat Matcher Worker
 	mux.HandleFunc("/websocket/connect", m.Authenticator(chatHandlr.SocketConnect))

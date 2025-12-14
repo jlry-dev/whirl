@@ -366,6 +366,8 @@ func (h *Hub) HandleMessage(m *Message) {
 		h.clientMU.RLock()
 		client, ok := h.clients[strconv.Itoa(m.From)]
 		if !ok {
+			h.clientMU.RUnlock()
+
 			// the client is offline
 			return
 		}
@@ -376,6 +378,7 @@ func (h *Hub) HandleMessage(m *Message) {
 		// WARN: again we need to properly create a context with proper deadline
 		err := h.msgSrv.StoreMessage(context.Background(), m.From, m.To, m.Content, m.Timestamp)
 		if err != nil {
+			h.logger.Error("handle message:" + err.Error())
 			h.logger.Error("direct message error : failed to store message")
 
 			// This is an error because it should have been
@@ -396,7 +399,6 @@ func (h *Hub) HandleMessage(m *Message) {
 		receiver, online := h.clients[strconv.Itoa(m.To)]
 		h.clientMU.RUnlock()
 		if online {
-			// save to database
 			select {
 			case receiver.send <- m:
 			default:
