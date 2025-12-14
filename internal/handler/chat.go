@@ -230,6 +230,11 @@ func (h *Hub) JoinRandom(c *Client) {
 		pair := h.queue[0]
 		h.queue = h.queue[1:]
 
+		// Since na pop na ang client fro the queue, ato siya e flag as not in queue
+		pair.mu.Lock()
+		pair.inQueue = false
+		pair.mu.Unlock()
+
 		// check nato if online ba ang napili nga pair
 		// basin na disconnect na
 		h.clientMU.RLock()
