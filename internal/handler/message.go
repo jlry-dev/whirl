@@ -71,7 +71,7 @@ func (h *MessageHandlr) RetrieveMessages(w http.ResponseWriter, r *http.Request)
 
 	dto, err := h.srv.RetreiveMessages(ctx, pOne, pTwo, page)
 	if err != nil {
-		h.logger.Error("retrieve message: invalid http method", slog.String("METHOD", r.Method), slog.String("PATH", r.URL.Path))
+		h.logger.Error(err.Error(), slog.String("METHOD", r.Method), slog.String("PATH", r.URL.Path))
 
 		h.rspHandler.Error(w, http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError), nil)
 		return

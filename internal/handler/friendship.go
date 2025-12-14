@@ -97,21 +97,21 @@ func (h *FriendshipHandlr) UpdateFriendshipStatus(w http.ResponseWriter, r *http
 	ctx := r.Context()
 
 	if r.Method != http.MethodPut {
-		h.logger.Error("remove friend: invalid http method", slog.String("METHOD", r.Method), slog.String("PATH", r.URL.Path))
+		h.logger.Error("update friendship handler: invalid http method", slog.String("METHOD", r.Method), slog.String("PATH", r.URL.Path))
 		h.rspHandler.Error(w, http.StatusMethodNotAllowed, http.StatusText(http.StatusMethodNotAllowed), nil)
 		return
 	}
 
 	typeHeader := strings.Split(r.Header.Get("Content-Type"), ";")
 	if typeHeader[0] != "application/json" {
-		h.logger.Error("remove friend unsupported media format", slog.String("METHOD", r.Method), slog.String("PATH", r.URL.Path))
+		h.logger.Error("update friendship unsupported media format", slog.String("METHOD", r.Method), slog.String("PATH", r.URL.Path))
 		h.rspHandler.Error(w, http.StatusUnsupportedMediaType, http.StatusText(http.StatusUnsupportedMediaType), nil)
 		return
 	}
 
 	userID, ok := ctx.Value("userID").(int)
 	if !ok {
-		h.logger.Error("handler: failed to get the userID value out of ctx", slog.String("METHOD", r.Method), slog.String("PATH", r.URL.Path))
+		h.logger.Error("remove friend: failed to get the userID value out of ctx", slog.String("METHOD", r.Method), slog.String("PATH", r.URL.Path))
 		h.rspHandler.Error(w, http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError), nil)
 		return
 	}
@@ -129,7 +129,7 @@ func (h *FriendshipHandlr) UpdateFriendshipStatus(w http.ResponseWriter, r *http
 
 	rspData, err := h.frSrv.UpdateFriendshipStatus(ctx, data)
 	if err != nil {
-		h.logger.Error(err.Error(), slog.String("w", r.Method), slog.String("PATH", r.URL.Path))
+		h.logger.Error("retrieve friends: ", slog.String("METHOD", r.Method), slog.String("PATH", r.URL.Path))
 
 		vldErrs, ok := err.(*service.ErrVldFailed)
 		if ok {
@@ -156,28 +156,28 @@ func (h *FriendshipHandlr) RetrieveFriends(w http.ResponseWriter, r *http.Reques
 	ctx := r.Context()
 
 	if r.Method != http.MethodGet {
-		h.logger.Error("remove friend: invalid http method", slog.String("METHOD", r.Method), slog.String("PATH", r.URL.Path))
+		h.logger.Error("retrieve friend: invalid http method", slog.String("METHOD", r.Method), slog.String("PATH", r.URL.Path))
 		h.rspHandler.Error(w, http.StatusMethodNotAllowed, http.StatusText(http.StatusMethodNotAllowed), nil)
 		return
 	}
 
 	typeHeader := strings.Split(r.Header.Get("Content-Type"), ";")
 	if typeHeader[0] != "application/json" {
-		h.logger.Error("remove friend unsupported media format", slog.String("METHOD", r.Method), slog.String("PATH", r.URL.Path))
+		h.logger.Error("retrieve friend unsupported media format", slog.String("METHOD", r.Method), slog.String("PATH", r.URL.Path))
 		h.rspHandler.Error(w, http.StatusUnsupportedMediaType, http.StatusText(http.StatusUnsupportedMediaType), nil)
 		return
 	}
 
 	userID, ok := ctx.Value("userID").(int)
 	if !ok {
-		h.logger.Error("handler: failed to get the userID value out of ctx", slog.String("METHOD", r.Method), slog.String("PATH", r.URL.Path))
+		h.logger.Error("retrieve friend: failed to get the userID value out of ctx", slog.String("METHOD", r.Method), slog.String("PATH", r.URL.Path))
 		h.rspHandler.Error(w, http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError), nil)
 		return
 	}
 
 	page, err := strconv.Atoi(r.URL.Query().Get("page"))
 	if err != nil {
-		h.logger.Error("retrieve message: failed to convert page to int", slog.String("METHOD", r.Method), slog.String("PATH", r.URL.Path))
+		h.logger.Error(err.Error(), slog.String("METHOD", r.Method), slog.String("PATH", r.URL.Path))
 
 		h.rspHandler.Error(w, http.StatusBadRequest, http.StatusText(http.StatusBadRequest), nil)
 		return
@@ -190,7 +190,7 @@ func (h *FriendshipHandlr) RetrieveFriends(w http.ResponseWriter, r *http.Reques
 
 	dto, err := h.frSrv.RetrieveFriends(ctx, userID, page)
 	if err != nil {
-		h.logger.Error("retrieve message: invalid http method", slog.String("METHOD", r.Method), slog.String("PATH", r.URL.Path))
+		h.logger.Error(err.Error(), slog.String("METHOD", r.Method), slog.String("PATH", r.URL.Path))
 
 		h.rspHandler.Error(w, http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError), nil)
 		return
