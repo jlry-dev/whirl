@@ -37,6 +37,7 @@ func (m *middlewareStruct) CorsMiddleware(next http.Handler) http.Handler {
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
+		m.logger.Info("request has been made", slog.String("origin", origin))
 
 		if allowAll {
 			w.Header().Set("Access-Control-Allow-Origin", "*")
