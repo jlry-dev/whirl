@@ -155,7 +155,7 @@ func (h *FriendshipHandlr) RetrieveFriends(w http.ResponseWriter, r *http.Reques
 	defer r.Body.Close()
 	ctx := r.Context()
 
-	if r.Method != http.MethodPut {
+	if r.Method != http.MethodGet {
 		h.logger.Error("remove friend: invalid http method", slog.String("METHOD", r.Method), slog.String("PATH", r.URL.Path))
 		h.rspHandler.Error(w, http.StatusMethodNotAllowed, http.StatusText(http.StatusMethodNotAllowed), nil)
 		return
