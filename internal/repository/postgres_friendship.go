@@ -92,7 +92,7 @@ func (f *FriendshipRepo) GetFriends(ctx context.Context, qr Queryer, userID, pag
 	friends := make([]*dto.FriendDetails, 0, 100)
 	for rows.Next() {
 		var u dto.FriendDetails
-		err := rows.Scan(u.ID, u.Username, u.Bio, u.Bdate, u.Avatar, u.CountryName, u.CountryCode)
+		err := rows.Scan(&u.ID, &u.Username, &u.Bio, &u.Bdate, &u.Avatar, &u.CountryName, &u.CountryCode)
 		if err != nil {
 			return nil, fmt.Errorf("repo: failed to scan friend row : %w", err)
 		}

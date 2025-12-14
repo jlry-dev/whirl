@@ -16,11 +16,11 @@ type FrienshipServiceSuccessDTO struct {
 type FriendDetails struct {
 	ID          int       `json:"id"`
 	Username    string    `json:"username"`
-	Bio         string    `json:"bio"`
+	Bio         *string   `json:"bio"`
 	Bdate       time.Time `json:"bdate"`
 	CountryCode string    `json:"country-code"`
 	CountryName string    `json:"country-name"`
-	Avatar      string    `json:"avatar"`
+	Avatar      *string   `json:"avatar"`
 }
 
 type FriendsDetailsResponse struct {

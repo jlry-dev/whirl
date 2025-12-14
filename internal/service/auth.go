@@ -116,7 +116,7 @@ func (srv *AuthSrv) Register(ctx context.Context, data *dto.RegisterDTO) (*dto.R
 		ID:          uid,
 		Username:    data.Username,
 		Email:       data.Email,
-		Bio:         data.Bio,
+		Bio:         &data.Bio,
 		Bdate:       pBdate,
 		CountryCode: data.CountryCode,
 	}
