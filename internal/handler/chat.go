@@ -280,6 +280,8 @@ func (h *Hub) JoinRandom(c *Client) {
 		c.randomPair = pair
 		pair.randomPair = c
 
+		h.logger.Info("a pair have been whirled", slog.String(c.userID.String(), pair.userID.String()))
+
 		pair.mu.Unlock()
 		c.mu.Unlock()
 
