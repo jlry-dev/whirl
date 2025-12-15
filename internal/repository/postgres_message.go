@@ -24,7 +24,7 @@ func (r *MessageRepo) CreateMessage(ctx context.Context, qr Queryer, ch *model.M
 }
 
 func (r *MessageRepo) GetMessages(ctx context.Context, qr Queryer, uidOne, uidTwo, page int) ([]*model.Message, error) {
-	qry := `SELECT sender_id, receiver_id, content, timestamp 
+	qry := `SELECT id, sender_id, receiver_id, content, timestamp 
 		FROM message as m 
 		WHERE (m.sender_id = $1 AND m.receiver_id = $2) OR (m.sender_id = $2 AND m.receiver_id = $1)
 		ORDER BY m.timestamp DESC
@@ -40,7 +40,7 @@ func (r *MessageRepo) GetMessages(ctx context.Context, qr Queryer, uidOne, uidTw
 	messages := make([]*model.Message, 0, 100)
 	for rows.Next() {
 		var m model.Message
-		err := rows.Scan(&m.SenderID, &m.ReceiverID, &m.Content, &m.Timestamp)
+		err := rows.Scan(&m.ID, &m.SenderID, &m.ReceiverID, &m.Content, &m.Timestamp)
 		if err != nil {
 			return nil, fmt.Errorf("repo: failed to scan message row : %w", err)
 		}
