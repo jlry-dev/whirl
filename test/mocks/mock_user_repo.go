@@ -35,3 +35,9 @@ func (m *MockUserRepo) GetUserWithCountryByUsername(ctx context.Context, qr repo
 
 	return args.Get(0).(*dto.UserWithCountryDTO), args.Error(1)
 }
+
+func (m *MockUserRepo) CheckUsers(ctx context.Context, qr repository.Queryer, userIDs ...int) (bool, error) {
+	args := m.Called(ctx, qr, userIDs)
+
+	return args.Bool(0), args.Error(1)
+}
