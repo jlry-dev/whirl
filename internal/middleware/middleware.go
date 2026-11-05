@@ -107,6 +107,7 @@ func (m *middlewareStruct) Authenticator(next http.HandlerFunc) http.HandlerFunc
 		if err != nil {
 			m.logger.Error(err.Error(), slog.String("METHOD", r.Method), slog.String("PATH", r.URL.Path))
 			m.rsp.Error(w, http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError), nil)
+			return
 		}
 
 		nCtx := context.WithValue(ctx, "userID", userID)
