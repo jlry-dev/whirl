@@ -172,7 +172,10 @@ func (h *Hub) Disconnect(c *Client) {
 	h.clientMU.Lock()
 	clientID := c.userID.String()
 
-	h.randomLeave <- c
+	if c.randomPair != nil {
+		h.randomLeave <- c
+	}
+
 	if _, ok := h.clients[clientID]; ok {
 
 		delete(h.clients, clientID)
