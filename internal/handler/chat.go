@@ -591,9 +591,16 @@ func (c *Client) ReadMessage() {
 
 		case "friend_request":
 			msg.From = c.userID.Int()
-			msg.To = c.randomPair.userID.Int()
-
-			c.hub.messages <- &msg
+			if pair := c.randomPair; pair == nil {
+				c.send <- &Message{
+					Type:    "error",
+					Code:    "CONNECTION_NOT_EXIST",
+					Content: "You are not connected to a random user",
+				}
+			} else {
+				msg.To = pair.userID.Int()
+				c.hub.messages <- &msg
+			}
 
 		default:
 			c.send <- &Message{
