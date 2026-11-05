@@ -40,15 +40,17 @@ func (h *ResponseHandler) Error(w http.ResponseWriter, statusCode int, errMessag
 		Fields: fields,
 	}
 
-	buf := &bytes.Buffer{}
-	if err := json.NewEncoder(buf).Encode(payload); err != nil {
-		// In cases where there was encoding errors
-
-		h.logger.Error(fmt.Sprintf("response: failed to encode json response: %v", err.Error()))
-		http.Error(w, `{"error": "internal server error"}`, http.StatusInternalServerError)
+	buf, err := json.Marshal(payload)
+	if err != nil {
+		h.logger.Error("response: failed to encode json response", "error", err)
+		http.Error(w, `{"error":"internal server error"}`, http.StatusInternalServerError)
+		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
-	w.Write(buf.Bytes())
+
+	if _, err := w.Write(buf); err != nil {
+		h.logger.Error("response: failed to write error response", "error", err)
+	}
 }
