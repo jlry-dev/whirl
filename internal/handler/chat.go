@@ -51,7 +51,7 @@ var upgrader = websocket.Upgrader{
 func (h *ChatHandlr) SocketConnect(w http.ResponseWriter, r *http.Request) {
 	userID, ok := r.Context().Value("userID").(int)
 	if !ok {
-		h.rspHandler.Error(w, http.StatusBadRequest, http.StatusText(http.StatusInternalServerError), nil)
+		h.rspHandler.Error(w, http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError), nil)
 		return
 	}
 
@@ -66,14 +66,13 @@ func (h *ChatHandlr) SocketConnect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sendCh := make(chan *Message, 20)
 	cl := &Client{
-		logger:      h.logger,
-		userID:      uid(userID),
-		hub:         h.hub,
-		ws:          ws,
-		send:        sendCh,
-		isConnected: true,
+		logger: h.logger,
+		userID: uid(userID),
+		hub:    h.hub,
+		ws:     ws,
+		send:   make(chan *Message, 20),
+		done:   make(chan struct{}),
 	}
 
 	go cl.ReadMessage()
@@ -84,15 +83,17 @@ func (h *ChatHandlr) SocketConnect(w http.ResponseWriter, r *http.Request) {
 }
 
 type Client struct {
-	logger      *slog.Logger
-	mu          sync.RWMutex
-	inQueue     bool // Indicator for when the client is queueing for random chat
-	userID      uid
-	hub         *Hub
-	ws          *websocket.Conn
-	send        chan *Message
-	randomPair  *Client // This is for the omegle like feature where we pair the user with another user
-	isConnected bool
+	logger *slog.Logger
+
+	mu         sync.RWMutex
+	inQueue    bool
+	userID     uid
+	hub        *Hub
+	ws         *websocket.Conn
+	send       chan *Message
+	done       chan struct{}
+	closeOnce  sync.Once
+	randomPair *Client
 }
 
 type Hub struct {
@@ -163,26 +164,41 @@ func (h *Hub) Run() {
 }
 
 func (h *Hub) Connect(c *Client) {
+	clientID := c.userID.String()
+
 	h.clientMU.Lock()
-	h.clients[c.userID.String()] = c
+	old := h.clients[clientID]
+	h.clients[clientID] = c
 	h.clientMU.Unlock()
+
+	// A new connection takes over from a stale one. Closing the old client
+	// here also unblocks its ReadMessage/WriteMessage goroutines.
+	if old != nil && old != c {
+		h.detach(old)
+	}
 }
 
 func (h *Hub) Disconnect(c *Client) {
-	h.clientMU.Lock()
+	h.detach(c)
+}
+
+// detach removes c from the active client map and random-chat state.
+// It is safe to call more than once and will never remove a newer connection
+// that has taken over c's user ID.
+func (h *Hub) detach(c *Client) {
 	clientID := c.userID.String()
 
-	if c.randomPair != nil {
-		h.randomLeave <- c
-	}
-
-	if _, ok := h.clients[clientID]; ok {
-
+	h.clientMU.Lock()
+	if h.clients[clientID] == c {
 		delete(h.clients, clientID)
-		c.ws.Close()
-		close(c.send)
 	}
 	h.clientMU.Unlock()
+
+	// Do random-chat cleanup outside clientMU so a blocked/slow client cannot
+	// stall all client lookups.
+	h.LeaveRandom(c)
+
+	c.close()
 }
 
 func (h *Hub) JoinRandom(c *Client) {
@@ -193,30 +209,31 @@ func (h *Hub) JoinRandom(c *Client) {
 
 	if alreadyInQueue {
 		h.logger.Info("user tried to join random but is already in queue", slog.String("user_id", c.userID.String()))
-		c.send <- &Message{
+		c.enqueue(&Message{
 			Type:    "error",
 			Code:    "ALREADY_IN_QUEUE",
 			To:      c.userID.Int(),
 			Content: "The user is already queueing for random chat",
-		}
+		})
 
 		return
 	}
 
 	if isPaired {
 		h.logger.Info("user tried to join random but is already connected", slog.String("user_id", c.userID.String()))
-		c.send <- &Message{
+		c.enqueue(&Message{
 			Type:    "error",
 			Code:    "CONNECTED_TO_RANDOM",
 			To:      c.userID.Int(),
 			Content: "The user is already connected in a random chat",
-		}
+		})
 
 		return
 	}
 
 	h.clientMU.RLock()
-	_, online := h.clients[c.userID.String()]
+	current, ok := h.clients[c.userID.String()]
+	online := ok && current == c
 	h.clientMU.RUnlock()
 
 	// Check if the requestor is still online
@@ -242,7 +259,8 @@ func (h *Hub) JoinRandom(c *Client) {
 		// check nato if online ba ang napili nga pair
 		// basin na disconnect na
 		h.clientMU.RLock()
-		_, pairOnline := h.clients[pair.userID.String()]
+		pairCurrent, ok := h.clients[pair.userID.String()]
+		pairOnline := ok && pairCurrent == pair
 		h.clientMU.RUnlock()
 
 		if !pairOnline {
@@ -294,17 +312,17 @@ func (h *Hub) JoinRandom(c *Client) {
 		pair.mu.Unlock()
 		c.mu.Unlock()
 
-		c.send <- &Message{
+		c.enqueue(&Message{
 			Type:    "random_joined",
 			To:      c.userID.Int(),
 			Content: "You have been whirled",
-		}
+		})
 
-		pair.send <- &Message{
+		pair.enqueue(&Message{
 			Type:    "random_joined",
 			To:      pair.userID.Int(),
 			Content: "You have been whirled",
-		}
+		})
 
 		return
 	}
@@ -322,9 +340,7 @@ func (h *Hub) JoinRandom(c *Client) {
 }
 
 func (h *Hub) LeaveRandom(c *Client) {
-	c.mu.RLock()
-	pair := c.randomPair
-	c.mu.RUnlock()
+	pair := c.pair()
 
 	h.logger.Info("user is leaving random queue", slog.String("user", c.userID.String()))
 	// If the user has a pair then
@@ -340,13 +356,10 @@ func (h *Hub) LeaveRandom(c *Client) {
 		pair.mu.Unlock()
 		c.mu.Unlock()
 
-		select {
-		case pair.send <- &Message{
+		if !pair.enqueue(&Message{
 			Type:    "notification",
 			Content: "random_pair_left",
-		}:
-			// sent successfully
-		default:
+		}) {
 			h.logger.Info("random_leave: notification dropped: pair already disconnected")
 		}
 
@@ -360,7 +373,7 @@ func (h *Hub) LeaveRandom(c *Client) {
 	c.mu.Unlock()
 
 	for i, cl := range h.queue {
-		if c.userID == cl.userID {
+		if cl == c {
 			h.queue = append(h.queue[:i], h.queue[i+1:]...)
 			break // only remove first occurrence
 		}
@@ -390,15 +403,11 @@ func (h *Hub) HandleMessage(m *Message) {
 			h.logger.Error("direct message error : failed to store message")
 
 			// This is an error because it should have been
-			select {
-			case client.send <- &Message{
+			client.enqueue(&Message{
 				Type:    "error",
 				Code:    "SEND_MESSAGE_FAILED",
 				Content: "Random pair has disconnected",
-			}:
-			default:
-				// ignore on fail
-			}
+			})
 
 			return
 		}
@@ -407,10 +416,7 @@ func (h *Hub) HandleMessage(m *Message) {
 		receiver, online := h.clients[strconv.Itoa(m.To)]
 		h.clientMU.RUnlock()
 		if online {
-			select {
-			case receiver.send <- m:
-			default:
-			}
+			receiver.enqueue(m)
 		}
 
 	case "message_random":
@@ -427,15 +433,11 @@ func (h *Hub) HandleMessage(m *Message) {
 				c.logger.Error("message random error : pair is offline")
 
 				// This is an error because it should have been
-				select {
-				case c.send <- &Message{
+				c.enqueue(&Message{
 					Type:    "error",
 					Code:    "SEND_MESSAGE_FAILED",
 					Content: "Random pair has disconnected",
-				}:
-				default:
-					// ignore on fail
-				}
+				})
 			}
 
 			return
@@ -444,10 +446,7 @@ func (h *Hub) HandleMessage(m *Message) {
 		// We clear out the from id because we want it to be anonymous on the frontend
 		m.From = 0
 
-		select {
-		case receiver.send <- m:
-		default:
-		}
+		receiver.enqueue(m)
 
 	case "friend_request":
 		senderID := strconv.Itoa(m.From)
@@ -482,80 +481,55 @@ func (h *Hub) HandleMessage(m *Message) {
 				To:   m.To,
 			})
 			if err != nil {
-				select {
-				case sender.send <- &Message{
+				sender.enqueue(&Message{
 					Type: "friend_request_failed",
-				}:
-				default:
-				}
+				})
 
-				select {
-				case receiver.send <- &Message{
+				receiver.enqueue(&Message{
 					Type: "friend_request_failed",
-				}:
-				default:
-				}
+				})
 				return
 			}
 
 			// Notify
-			select {
-			case sender.send <- &Message{
+			sender.enqueue(&Message{
 				Type: "friend_request_success",
-			}:
-			default:
-				// Just skip, just tryna avoid a panic :>
-			}
+			})
 
-			select {
-			case receiver.send <- &Message{
+			receiver.enqueue(&Message{
 				Type: "friend_request_success",
-			}:
-			default:
-			}
+			})
 
 			return
 		}
 
 		h.friendRequests[senderID] = receiver
-		select {
-		case receiver.send <- &Message{
+		receiver.enqueue(&Message{
 			Type: "friend_request",
-		}:
-		default:
-		}
+		})
 	}
 }
 
 func (c *Client) WriteMessage() {
-	defer func() {
-		// INFO: my decision to close the websocket on write is message is because what if there were buffered messages
-		c.ws.Close()
-	}()
-
-	if !c.isConnected {
-	}
+	defer c.close()
 
 	for {
-		m, ok := <-c.send
-
-		if !ok {
-			c.logger.Info("write message: closing socket", slog.String("userID", c.userID.String()))
-			c.ws.WriteMessage(websocket.CloseMessage, []byte{})
+		select {
+		case <-c.done:
 			return
+		case m := <-c.send:
+			_ = c.ws.SetWriteDeadline(time.Now().Add(10 * time.Second))
+			if err := c.ws.WriteJSON(m); err != nil {
+				c.logger.Error("socket error: failed to write JSON", slog.String("error", err.Error()))
+				return
+			}
 		}
-
-		if err := c.ws.WriteJSON(m); err != nil {
-			c.logger.Error("socket error: failed to write JSON", slog.String("error", err.Error()))
-			c.ws.WriteMessage(websocket.CloseMessage, []byte{})
-			return
-		}
-
 	}
 }
 
 func (c *Client) ReadMessage() {
 	defer func() {
+		c.close()
 		// INFO: when the websocket closes it should get disconnected
 		c.hub.disconnect <- c
 	}()
@@ -566,7 +540,6 @@ func (c *Client) ReadMessage() {
 		var msg Message
 		if err := c.ws.ReadJSON(&msg); err != nil {
 			c.logger.Error("read message: closing socket got error", slog.String("error", err.Error()))
-			c.ws.WriteMessage(websocket.CloseMessage, []byte{})
 			return
 		}
 
@@ -577,12 +550,12 @@ func (c *Client) ReadMessage() {
 			c.hub.randomLeave <- c
 		case "message_random":
 			msg.From = c.userID.Int()
-			if pair := c.randomPair; pair == nil {
-				c.send <- &Message{
+			if pair := c.pair(); pair == nil {
+				c.enqueue(&Message{
 					Type:    "error",
 					Code:    "CONNECTION_NOT_EXIST",
 					Content: "You are not connected to a random user",
-				}
+				})
 			} else {
 				msg.To = pair.userID.Int()
 				c.hub.messages <- &msg
@@ -594,24 +567,58 @@ func (c *Client) ReadMessage() {
 
 		case "friend_request":
 			msg.From = c.userID.Int()
-			if pair := c.randomPair; pair == nil {
-				c.send <- &Message{
+			if pair := c.pair(); pair == nil {
+				c.enqueue(&Message{
 					Type:    "error",
 					Code:    "CONNECTION_NOT_EXIST",
 					Content: "You are not connected to a random user",
-				}
+				})
 			} else {
 				msg.To = pair.userID.Int()
 				c.hub.messages <- &msg
 			}
 
 		default:
-			c.send <- &Message{
+			c.enqueue(&Message{
 				Type:    "error",
 				Code:    "INVALID_MESSAGE_TYPE",
 				Content: "The server does not recognize the message type",
-			}
+			})
 		}
 
 	}
+}
+
+func (c *Client) close() {
+	c.closeOnce.Do(func() {
+		close(c.done)
+		if c.ws != nil {
+			_ = c.ws.Close()
+		}
+	})
+}
+
+func (c *Client) enqueue(m *Message) bool {
+	select {
+	case <-c.done:
+		return false
+	default:
+	}
+
+	select {
+	case c.send <- m:
+		return true
+	default:
+		// Slow client: close it so it can reconnect instead of blocking the Hub.
+		c.logger.Warn("send buffer full; closing slow client",
+			slog.String("userID", c.userID.String()))
+		c.close()
+		return false
+	}
+}
+
+func (c *Client) pair() *Client {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.randomPair
 }
