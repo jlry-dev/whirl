@@ -14,6 +14,25 @@ import (
 	"github.com/jlry-dev/whirl/internal/service"
 )
 
+const (
+	// hubShardCount is the number of serial executors used for per-user events.
+	// Events for the same user always land on the same shard, so they are
+	// processed in submission order. Different users can run in parallel.
+	hubShardCount = 8
+
+	// hubShardQueueSize bounds how many events can wait for a shard. Producers
+	// block when the queue is full, which gives natural backpressure instead of
+	// spawning unbounded goroutines.
+	hubShardQueueSize = 256
+
+	// hubRandomQueueSize bounds the matchmaker mailbox.
+	hubRandomQueueSize = 256
+
+	// hubDBTimeout bounds database work done by Hub workers so a slow query
+	// cannot stall a shard or the matchmaker forever.
+	hubDBTimeout = 10 * time.Second
+)
+
 type uid int
 
 func (u uid) String() string {
@@ -75,10 +94,19 @@ func (h *ChatHandlr) SocketConnect(w http.ResponseWriter, r *http.Request) {
 		done:   make(chan struct{}),
 	}
 
-	go cl.ReadMessage()
-	go cl.WriteMessage()
+	// Register the client before starting its reader. Because the registration
+	// and every later event for this user go to the same shard, Connect is
+	// guaranteed to run before the first join/message/disconnect.
+	registered := make(chan struct{})
+	h.hub.submitUser(cl.userID, func() {
+		defer close(registered)
+		h.hub.Connect(cl)
+	}, nil)
+	<-registered
 
-	h.hub.connect <- cl
+	go cl.WriteMessage()
+	go cl.ReadMessage()
+
 	h.logger.Info("socket connect: user has established websocket connection", slog.Int("userID", userID))
 }
 
@@ -105,18 +133,21 @@ type Hub struct {
 	clients        map[string]*Client
 	friendMU       sync.RWMutex
 	friendRequests map[string]*Client
-	queueMU        sync.RWMutex
-	queue          []*Client
 
-	connect    chan *Client
-	disconnect chan *Client
+	// queue is owned by the matchmaker, but queueMU is also taken by the
+	// disconnect path so a client can always be removed from the queue.
+	queueMU sync.Mutex
+	queue   []*Client
 
-	messages    chan *Message
-	randomJoin  chan *Client
-	randomLeave chan *Client
+	shards       *shardPool
+	randomEvents chan randomEvent
 }
 
 func NewHub(frSrv service.FriendshipService, msgSrv service.MessageService, logger *slog.Logger) *Hub {
+	if logger == nil {
+		logger = slog.Default()
+	}
+
 	return &Hub{
 		frSrv:  frSrv,
 		msgSrv: msgSrv,
@@ -124,12 +155,10 @@ func NewHub(frSrv service.FriendshipService, msgSrv service.MessageService, logg
 		logger:         logger,
 		clients:        make(map[string]*Client, 32),
 		friendRequests: make(map[string]*Client, 4),
-		connect:        make(chan *Client, 12),
-		disconnect:     make(chan *Client, 12),
-		messages:       make(chan *Message, 32),
 		queue:          []*Client{},
-		randomJoin:     make(chan *Client, 12),
-		randomLeave:    make(chan *Client, 12),
+
+		shards:       newShardPool(hubShardCount, hubShardQueueSize, logger),
+		randomEvents: make(chan randomEvent, hubRandomQueueSize),
 	}
 }
 
@@ -142,24 +171,152 @@ type Message struct {
 	Timestamp time.Time `json:"timestamp"`
 }
 
-func (h *Hub) Run() {
-	for {
+type job func()
+
+type shard struct {
+	id   int
+	jobs chan job
+}
+
+func newShard(id, capacity int, logger *slog.Logger) *shard {
+	s := &shard{
+		id:   id,
+		jobs: make(chan job, capacity),
+	}
+	go s.run(logger)
+	return s
+}
+
+func (s *shard) run(logger *slog.Logger) {
+	for j := range s.jobs {
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					logger.Error("hub shard job panicked",
+						slog.Int("shard", s.id),
+						slog.Any("panic", r))
+				}
+			}()
+			j()
+		}()
+	}
+}
+
+type shardPool struct {
+	shards []*shard
+}
+
+func newShardPool(count, capacity int, logger *slog.Logger) *shardPool {
+	p := &shardPool{
+		shards: make([]*shard, count),
+	}
+	for i := range p.shards {
+		p.shards[i] = newShard(i, capacity, logger)
+	}
+	return p
+}
+
+func (p *shardPool) shardFor(key uint64) *shard {
+	return p.shards[key%uint64(len(p.shards))]
+}
+
+// submit enqueues j on the shard for key. It blocks while the shard queue is
+// full, so callers apply backpressure instead of creating unbounded work. A
+// non-nil done channel lets a closing client abandon the wait.
+func (p *shardPool) submit(key uint64, j job, done <-chan struct{}) bool {
+	if done != nil {
 		select {
-		case c := <-h.connect:
-			go h.Connect(c)
-
-		case c := <-h.disconnect:
-			go h.Disconnect(c)
-
-		case c := <-h.randomJoin:
-			go h.JoinRandom(c)
-
-		case c := <-h.randomLeave:
-			go h.LeaveRandom(c)
-
-		case m := <-h.messages:
-			go h.HandleMessage(m)
+		case <-done:
+			return false
+		default:
 		}
+	}
+
+	s := p.shardFor(key)
+	if done == nil {
+		s.jobs <- j
+		return true
+	}
+
+	select {
+	case s.jobs <- j:
+		return true
+	case <-done:
+		return false
+	}
+}
+
+func (h *Hub) submitUser(userID uid, j job, done <-chan struct{}) bool {
+	return h.shards.submit(uint64(userID), j, done)
+}
+
+type randomEventKind uint8
+
+const (
+	randomJoinEvent randomEventKind = iota
+	randomLeaveEvent
+)
+
+type randomEvent struct {
+	kind   randomEventKind
+	client *Client
+	done   chan struct{}
+}
+
+// Run is the matchmaker. It is the single owner of the random-chat decision
+// process, so join/leave requests are serialized globally while per-user work
+// continues to run in parallel on the shards.
+func (h *Hub) Run() {
+	for ev := range h.randomEvents {
+		h.handleRandomEvent(ev)
+	}
+}
+
+func (h *Hub) handleRandomEvent(ev randomEvent) {
+	defer func() {
+		if r := recover(); r != nil {
+			h.logger.Error("hub random event panicked", slog.Any("panic", r))
+		}
+		if ev.done != nil {
+			close(ev.done)
+		}
+	}()
+
+	switch ev.kind {
+	case randomJoinEvent:
+		h.JoinRandom(ev.client)
+	case randomLeaveEvent:
+		h.LeaveRandom(ev.client)
+	default:
+		h.logger.Warn("hub: unknown random event kind", slog.Int("kind", int(ev.kind)))
+	}
+}
+
+// requestRandom sends a matchmaking request from a user shard and waits for the
+// matchmaker to finish it. Because the shard is serial, a join submitted before
+// a message is guaranteed to be applied before that message is handled.
+func (h *Hub) requestRandom(kind randomEventKind, c *Client) {
+	select {
+	case <-c.done:
+		return
+	default:
+	}
+
+	ev := randomEvent{
+		kind:   kind,
+		client: c,
+		done:   make(chan struct{}),
+	}
+
+	select {
+	case h.randomEvents <- ev:
+	case <-c.done:
+		return
+	}
+
+	select {
+	case <-ev.done:
+	case <-c.done:
 	}
 }
 
@@ -194,11 +351,24 @@ func (h *Hub) detach(c *Client) {
 	}
 	h.clientMU.Unlock()
 
-	// Do random-chat cleanup outside clientMU so a blocked/slow client cannot
-	// stall all client lookups.
+	// LeaveRandom is safe here because it takes queueMU, which is also taken by
+	// the matchmaker around every queue/pair mutation.
 	h.LeaveRandom(c)
 
 	c.close()
+}
+
+func (h *Hub) isCurrentClient(c *Client) bool {
+	h.clientMU.RLock()
+	defer h.clientMU.RUnlock()
+	return h.clients[c.userID.String()] == c
+}
+
+func (h *Hub) clientByID(userID int) (*Client, bool) {
+	h.clientMU.RLock()
+	defer h.clientMU.RUnlock()
+	c, ok := h.clients[strconv.Itoa(userID)]
+	return c, ok
 }
 
 func (h *Hub) JoinRandom(c *Client) {
@@ -231,86 +401,47 @@ func (h *Hub) JoinRandom(c *Client) {
 		return
 	}
 
-	h.clientMU.RLock()
-	current, ok := h.clients[c.userID.String()]
-	online := ok && current == c
-	h.clientMU.RUnlock()
-
-	// Check if the requestor is still online
-	// Para ni sa cases where the random join request is buffered
-	// Pero ang requestor kay offline na diay
-	if !online {
+	// Check if the requestor is still online. This matters when a join request
+	// was buffered behind a reconnect or a disconnect.
+	if !h.isCurrentClient(c) {
 		h.logger.Info("user tried to join random but is already offline", slog.String("user_id", c.userID.String()))
 		return
 	}
 
-	h.queueMU.Lock()
-	defer h.queueMU.Unlock()
+	pair, ok := h.popCandidate(c)
+	if !ok {
+		h.requeue(c)
+		return
+	}
 
-	if len(h.queue) > 0 {
-		pair := h.queue[0]
-		h.queue = h.queue[1:]
-
-		// Since na pop na ang client fro the queue, ato siya e flag as not in queue
-		pair.mu.Lock()
-		pair.inQueue = false
-		pair.mu.Unlock()
-
-		// check nato if online ba ang napili nga pair
-		// basin na disconnect na
-		h.clientMU.RLock()
-		pairCurrent, ok := h.clients[pair.userID.String()]
-		pairOnline := ok && pairCurrent == pair
-		h.clientMU.RUnlock()
-
-		if !pairOnline {
-			h.randomJoin <- c
-
-			return
-		}
-
-		c.mu.RLock()
-		pair.mu.RLock()
-
-		// We check relationship, if they are both in a relationship (friends or blocked) they don't get paired together
-		hasRelationship, err := h.frSrv.CheckStatus(context.Background(), &dto.FriendshipDTO{ // WARN: we may need to add proper context deadline
+	hasRelationship := false
+	if h.frSrv != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), hubDBTimeout)
+		var err error
+		hasRelationship, err = h.frSrv.CheckStatus(ctx, &dto.FriendshipDTO{
 			From: c.userID.Int(),
 			To:   pair.userID.Int(),
 		})
+		cancel()
+
 		if err != nil {
 			h.logger.Error("join random: there was an error trying to check friendship status", slog.String("error", err.Error()))
-			pair.mu.RUnlock()
-			c.mu.RUnlock()
-
+			h.requeue(pair)
+			h.requeue(c)
 			return
 		}
+	}
 
-		if hasRelationship {
-			// they are in a relationship so we we put both of them back into the queue
-			pair.mu.RUnlock()
-			c.mu.RUnlock()
+	if hasRelationship {
+		// Requeue both, but do not immediately retry them. Retrying here
+		// would loop forever when the only two queued users are related.
+		h.requeue(pair)
+		h.requeue(c)
+		return
+	}
 
-			h.randomJoin <- pair
-			h.randomJoin <- c
-			return
-		}
-
-		pair.mu.RUnlock()
-		c.mu.RUnlock()
-
-		c.mu.Lock()
-		pair.mu.Lock()
-
-		pair.inQueue = false
-		c.inQueue = false
-
-		c.randomPair = pair
-		pair.randomPair = c
-
+	if h.tryPair(c, pair) {
 		h.logger.Info("a pair have been whirled", slog.String(c.userID.String(), pair.userID.String()))
-
-		pair.mu.Unlock()
-		c.mu.Unlock()
 
 		c.enqueue(&Message{
 			Type:    "random_joined",
@@ -327,34 +458,119 @@ func (h *Hub) JoinRandom(c *Client) {
 		return
 	}
 
+	// A concurrent disconnect changed the state while the relationship check
+	// was in flight. Requeue and let the next event retry.
+	h.requeue(pair)
+	h.requeue(c)
+}
+
+// popCandidate removes the next online client from the queue. The caller does
+// not own queueMU while doing the relationship check.
+func (h *Hub) popCandidate(c *Client) (*Client, bool) {
+	h.queueMU.Lock()
+	defer h.queueMU.Unlock()
+
+	for len(h.queue) > 0 {
+		pair := h.queue[0]
+		h.queue = h.queue[1:]
+
+		pair.mu.Lock()
+		pair.inQueue = false
+		pair.mu.Unlock()
+
+		if pair == c {
+			continue
+		}
+		if !h.isCurrentClient(pair) {
+			continue
+		}
+
+		return pair, true
+	}
+
+	return nil, false
+}
+
+// tryPair commits the pairing under queueMU so it cannot interleave with a
+// disconnect or another matchmaking decision.
+func (h *Hub) tryPair(c, pair *Client) bool {
+	h.queueMU.Lock()
+	defer h.queueMU.Unlock()
+
+	if !h.isCurrentClient(c) || !h.isCurrentClient(pair) {
+		return false
+	}
+
+	c.mu.Lock()
+	cEligible := !c.inQueue && c.randomPair == nil
+	c.mu.Unlock()
+
+	pair.mu.Lock()
+	pairEligible := !pair.inQueue && pair.randomPair == nil
+	pair.mu.Unlock()
+
+	if !cEligible || !pairEligible {
+		return false
+	}
+
+	c.mu.Lock()
+	pair.mu.Lock()
+
+	c.inQueue = false
+	pair.inQueue = false
+	c.randomPair = pair
+	pair.randomPair = c
+
+	pair.mu.Unlock()
+	c.mu.Unlock()
+
+	return true
+}
+
+// requeue puts c back into the random queue if it is still online and still
+// eligible. A client is eligible when it is neither queued nor paired.
+func (h *Hub) requeue(c *Client) {
+	h.queueMU.Lock()
+	defer h.queueMU.Unlock()
+
+	if !h.isCurrentClient(c) {
+		return
+	}
+
 	c.mu.Lock()
 	if c.inQueue || c.randomPair != nil {
 		c.mu.Unlock()
 		return
 	}
-
 	c.inQueue = true
-	h.queue = append(h.queue, c)
-
 	c.mu.Unlock()
+
+	h.queue = append(h.queue, c)
 }
 
 func (h *Hub) LeaveRandom(c *Client) {
+	h.queueMU.Lock()
+	defer h.queueMU.Unlock()
+
 	pair := c.pair()
 
 	h.logger.Info("user is leaving random queue", slog.String("user", c.userID.String()))
-	// If the user has a pair then
-	// we clear the pair's random pair field
 
 	if pair != nil {
 		c.mu.Lock()
-		pair.mu.Lock()
-
-		c.randomPair = nil
-		pair.randomPair = nil
-
-		pair.mu.Unlock()
+		c.inQueue = false
+		if c.randomPair == pair {
+			c.randomPair = nil
+		}
 		c.mu.Unlock()
+
+		pair.mu.Lock()
+		if pair.randomPair == c {
+			pair.randomPair = nil
+		}
+		pair.mu.Unlock()
+
+		h.removeFromQueueLocked(c)
 
 		if !pair.enqueue(&Message{
 			Type:    "notification",
@@ -366,148 +582,174 @@ func (h *Hub) LeaveRandom(c *Client) {
 		return
 	}
 
-	// not paired so we leave the queue
-	h.queueMU.Lock()
 	c.mu.Lock()
 	c.inQueue = false
 	c.mu.Unlock()
 
+	h.removeFromQueueLocked(c)
+}
+
+func (h *Hub) removeFromQueueLocked(c *Client) {
 	for i, cl := range h.queue {
 		if cl == c {
 			h.queue = append(h.queue[:i], h.queue[i+1:]...)
-			break // only remove first occurrence
+			return
 		}
 	}
-	h.queueMU.Unlock()
 }
 
 func (h *Hub) HandleMessage(m *Message) {
 	switch m.Type {
 	case "direct_message":
-		h.clientMU.RLock()
-		client, ok := h.clients[strconv.Itoa(m.From)]
-		if !ok {
-			h.clientMU.RUnlock()
-
-			// the client is offline
-			return
-		}
-		h.clientMU.RUnlock()
-
-		m.Timestamp = time.Now()
-		// save to database
-		// WARN: again we need to properly create a context with proper deadline
-		err := h.msgSrv.StoreMessage(context.Background(), m.From, m.To, m.Content, m.Timestamp)
-		if err != nil {
-			h.logger.Error("handle message:" + err.Error())
-			h.logger.Error("direct message error : failed to store message")
-
-			// This is an error because it should have been
-			client.enqueue(&Message{
-				Type:    "error",
-				Code:    "SEND_MESSAGE_FAILED",
-				Content: "Random pair has disconnected",
-			})
-
-			return
-		}
-
-		h.clientMU.RLock()
-		receiver, online := h.clients[strconv.Itoa(m.To)]
-		h.clientMU.RUnlock()
-		if online {
-			receiver.enqueue(m)
-		}
-
+		h.handleDirectMessage(m)
 	case "message_random":
-
-		h.clientMU.RLock()
-		receiver, online := h.clients[strconv.Itoa(m.To)]
-		c, cOnline := h.clients[strconv.Itoa(m.From)]
-		h.clientMU.RUnlock()
-
-		if !online {
-			// The pair is offline so we leave the chat
-			if cOnline {
-
-				c.logger.Error("message random error : pair is offline")
-
-				// This is an error because it should have been
-				c.enqueue(&Message{
-					Type:    "error",
-					Code:    "SEND_MESSAGE_FAILED",
-					Content: "Random pair has disconnected",
-				})
-			}
-
-			return
-		}
-
-		// We clear out the from id because we want it to be anonymous on the frontend
-		m.From = 0
-
-		receiver.enqueue(m)
-
+		h.handleRandomMessage(m)
 	case "friend_request":
-		senderID := strconv.Itoa(m.From)
-		receiverID := strconv.Itoa(m.To)
+		h.handleFriendRequest(m)
+	}
+}
 
-		h.clientMU.RLock()
-		sender, sOnline := h.clients[senderID]
-		receiver, rOnline := h.clients[receiverID]
-		h.clientMU.RUnlock()
+func (h *Hub) handleDirectMessage(m *Message) {
+	client, ok := h.clientByID(m.From)
+	if !ok {
+		// the client is offline
+		return
+	}
 
-		h.friendMU.Lock()
-		defer h.friendMU.Unlock()
+	if m.Timestamp.IsZero() {
+		m.Timestamp = time.Now()
+	}
 
-		if !sOnline || !rOnline {
-			// Clear any request made by either pariticipant
-			delete(h.friendRequests, receiverID)
-			delete(h.friendRequests, senderID)
-			return
-		}
+	ctx, cancel := context.WithTimeout(context.Background(), hubDBTimeout)
+	defer cancel()
 
-		// if
+	// save to database
+	if err := h.msgSrv.StoreMessage(ctx, m.From, m.To, m.Content, m.Timestamp); err != nil {
+		h.logger.Error("handle message:" + err.Error())
+		h.logger.Error("direct message error : failed to store message")
 
-		// Check if ang receiver naay pending nga friend friend request
-		// E accept dayn if naa na
-		if _, pending := h.friendRequests[receiverID]; pending {
-			ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
-			defer cancel()
+		client.enqueue(&Message{
+			Type:    "error",
+			Code:    "SEND_MESSAGE_FAILED",
+			Content: "Random pair has disconnected",
+		})
 
-			// Save to database
-			err := h.frSrv.AddFriend(ctx, &dto.FriendshipDTO{
-				From: m.From,
-				To:   m.To,
-			})
-			if err != nil {
-				sender.enqueue(&Message{
-					Type: "friend_request_failed",
-				})
+		return
+	}
 
-				receiver.enqueue(&Message{
-					Type: "friend_request_failed",
-				})
-				return
-			}
+	receiver, online := h.clientByID(m.To)
+	if online {
+		receiver.enqueue(m)
+	}
+}
 
-			// Notify
+func (h *Hub) handleRandomMessage(m *Message) {
+	sender, ok := h.clientByID(m.From)
+	if !ok {
+		return
+	}
+
+	// Resolve the pair at processing time, not at read time. This is what
+	// makes "join_random" followed immediately by "message_random" safe: both
+	// events are handled by the same shard in order.
+	pair := sender.pair()
+	if pair == nil {
+		sender.enqueue(&Message{
+			Type:    "error",
+			Code:    "CONNECTION_NOT_EXIST",
+			Content: "You are not connected to a random user",
+		})
+		return
+	}
+
+	receiver, online := h.clientByID(pair.userID.Int())
+	if !online {
+		sender.logger.Error("message random error : pair is offline")
+		sender.enqueue(&Message{
+			Type:    "error",
+			Code:    "SEND_MESSAGE_FAILED",
+			Content: "Random pair has disconnected",
+		})
+		return
+	}
+
+	m.To = pair.userID.Int()
+
+	// We clear out the from id because we want it to be anonymous on the frontend
+	m.From = 0
+
+	receiver.enqueue(m)
+}
+
+func (h *Hub) handleFriendRequest(m *Message) {
+	sender, sOnline := h.clientByID(m.From)
+	if !sOnline {
+		return
+	}
+
+	pair := sender.pair()
+	if pair == nil {
+		sender.enqueue(&Message{
+			Type:    "error",
+			Code:    "CONNECTION_NOT_EXIST",
+			Content: "You are not connected to a random user",
+		})
+		return
+	}
+
+	m.To = pair.userID.Int()
+
+	receiver, rOnline := h.clientByID(m.To)
+	senderID := strconv.Itoa(m.From)
+	receiverID := strconv.Itoa(m.To)
+
+	h.friendMU.Lock()
+	defer h.friendMU.Unlock()
+
+	if !rOnline {
+		// Clear any request made by either participant
+		delete(h.friendRequests, receiverID)
+		delete(h.friendRequests, senderID)
+		return
+	}
+
+	// Check if the receiver has a pending friend request. If so, accept it.
+	if _, pending := h.friendRequests[receiverID]; pending {
+		ctx, cancel := context.WithTimeout(context.Background(), hubDBTimeout)
+		defer cancel()
+
+		// Save to database
+		err := h.frSrv.AddFriend(ctx, &dto.FriendshipDTO{
+			From: m.From,
+			To:   m.To,
+		})
+		if err != nil {
 			sender.enqueue(&Message{
-				Type: "friend_request_success",
+				Type: "friend_request_failed",
 			})
 
 			receiver.enqueue(&Message{
-				Type: "friend_request_success",
+				Type: "friend_request_failed",
 			})
-
 			return
 		}
 
-		h.friendRequests[senderID] = receiver
-		receiver.enqueue(&Message{
-			Type: "friend_request",
+		// Notify
+		sender.enqueue(&Message{
+			Type: "friend_request_success",
 		})
+
+		receiver.enqueue(&Message{
+			Type: "friend_request_success",
+		})
+
+		return
 	}
+
+	h.friendRequests[senderID] = receiver
+	receiver.enqueue(&Message{
+		Type: "friend_request",
+	})
 }
 
 func (c *Client) WriteMessage() {
@@ -530,9 +772,13 @@ func (c *Client) WriteMessage() {
 func (c *Client) ReadMessage() {
 	defer func() {
 		c.close()
-		// INFO: when the websocket closes it should get disconnected
-		c.hub.disconnect <- c
+		// Every queued event for this client runs before the disconnect,
+		// because both are submitted to the same shard in order.
+		c.hub.submitUser(c.userID, func() {
+			c.hub.Disconnect(c)
+		}, nil)
 	}()
+
 	// Add maxsize read
 	// Add timer
 	for {
@@ -543,39 +789,30 @@ func (c *Client) ReadMessage() {
 			return
 		}
 
+		msg.From = c.userID.Int()
+		msg.Timestamp = time.Now()
+
 		switch msg.Type {
 		case "join_random":
-			c.hub.randomJoin <- c
-		case "leave_random":
-			c.hub.randomLeave <- c
-		case "message_random":
-			msg.From = c.userID.Int()
-			if pair := c.pair(); pair == nil {
-				c.enqueue(&Message{
-					Type:    "error",
-					Code:    "CONNECTION_NOT_EXIST",
-					Content: "You are not connected to a random user",
-				})
-			} else {
-				msg.To = pair.userID.Int()
-				c.hub.messages <- &msg
+			if !c.hub.submitUser(c.userID, func() {
+				c.hub.requestRandom(randomJoinEvent, c)
+			}, c.done) {
+				return
 			}
 
-		case "direct_message":
-			msg.From = c.userID.Int()
-			c.hub.messages <- &msg
+		case "leave_random":
+			if !c.hub.submitUser(c.userID, func() {
+				c.hub.requestRandom(randomLeaveEvent, c)
+			}, c.done) {
+				return
+			}
 
-		case "friend_request":
-			msg.From = c.userID.Int()
-			if pair := c.pair(); pair == nil {
-				c.enqueue(&Message{
-					Type:    "error",
-					Code:    "CONNECTION_NOT_EXIST",
-					Content: "You are not connected to a random user",
-				})
-			} else {
-				msg.To = pair.userID.Int()
-				c.hub.messages <- &msg
+		case "message_random", "direct_message", "friend_request":
+			m := msg
+			if !c.hub.submitUser(c.userID, func() {
+				c.hub.HandleMessage(&m)
+			}, c.done) {
+				return
 			}
 
 		default:
@@ -585,7 +822,6 @@ func (c *Client) ReadMessage() {
 				Content: "The server does not recognize the message type",
 			})
 		}
-
 	}
 }
 
