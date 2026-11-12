@@ -98,6 +98,11 @@ func (srv *UserSrv) UpdateAvatar(ctx context.Context, data *dto.UpdateAvatarDTO)
 				return &dto.UpdateAvatarSuccessDTO{}, fmt.Errorf("service: failed to upload img to cloudinary : %w", err)
 			}
 
+			// The SDK reports Cloudinary error responses as a successful result.
+			if cldRsp.Error.Message != "" || cldRsp.PublicID == "" || cldRsp.URL == "" {
+				return nil, fmt.Errorf("service: cloudinary rejected upload: %s", cldRsp.Error.Message)
+			}
+
 			// begin transaction
 			tx, _ := srv.db.Begin(ctx)
 			defer func() {
