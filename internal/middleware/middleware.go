@@ -32,33 +32,83 @@ func NewMiddleware(rsp *handler.ResponseHandler, logger *slog.Logger) Middleware
 }
 
 func (m *middlewareStruct) CorsMiddleware(next http.Handler) http.Handler {
-	frontendURL := os.Getenv("FRONTEND_ADDRESS")
-	allowAll := frontendURL == ""
+	allowedOrigins := parseAllowedOrigins(os.Getenv("FRONTEND_ADDRESS"))
+	allowAll := len(allowedOrigins) == 0
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
 		m.logger.Info("request has been made", slog.String("origin", origin))
 
-		if allowAll {
-			w.Header().Set("Access-Control-Allow-Origin", "*")
-		} else if origin == frontendURL {
-			w.Header().Set("Access-Control-Allow-Origin", origin) // Reflect for security
-		} else {
+		// CORS only applies to requests that carry an Origin header. Non-browser
+		// clients (curl, health checks, server-to-server) send none and must not
+		// be rejected. OPTIONS is still answered here because Go's method-based
+		// ServeMux patterns would otherwise return 405 for preflight requests.
+		if origin == "" {
+			if r.Method == http.MethodOptions {
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		allowedOrigin, ok := resolveOrigin(origin, allowedOrigins, allowAll)
+		if !ok {
+			// Add no CORS headers so the browser blocks the response.
+			if r.Method == http.MethodOptions {
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
 			http.Error(w, "CORS origin not allowed", http.StatusForbidden)
 			return
 		}
-		w.Header().Set("Access-Control-Allow-Origin", frontendURL)
+
+		// Set the header exactly once. Setting it again later would overwrite the
+		// value computed here, which is how the previous implementation broke
+		// allow-all mode.
+		w.Header().Set("Access-Control-Allow-Origin", allowedOrigin)
+		// Reflected origins make the response vary by Origin, so shared caches
+		// must key on it.
+		w.Header().Add("Vary", "Origin")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 		w.Header().Set("Access-Control-Max-Age", "86400")
 
 		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusOK)
+			w.WriteHeader(http.StatusNoContent)
 			return
 		}
 
 		next.ServeHTTP(w, r)
 	})
+}
+
+// parseAllowedOrigins splits a comma-separated FRONTEND_ADDRESS into a set of
+// allowed origins. An empty value means "allow any origin".
+func parseAllowedOrigins(raw string) map[string]struct{} {
+	allowed := make(map[string]struct{})
+	for _, part := range strings.Split(raw, ",") {
+		origin := strings.TrimSpace(part)
+		// The Origin header never includes a trailing slash, so normalize the
+		// configured value instead of the request.
+		origin = strings.TrimRight(origin, "/")
+		if origin != "" {
+			allowed[origin] = struct{}{}
+		}
+	}
+	return allowed
+}
+
+// resolveOrigin returns the value for Access-Control-Allow-Origin and whether
+// the request origin is permitted.
+func resolveOrigin(origin string, allowed map[string]struct{}, allowAll bool) (string, bool) {
+	if allowAll {
+		return "*", true
+	}
+	if _, ok := allowed[origin]; ok {
+		return origin, true
+	}
+	return "", false
 }
 
 func (m *middlewareStruct) Authenticator(next http.HandlerFunc) http.HandlerFunc {
