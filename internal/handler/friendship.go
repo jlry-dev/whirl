@@ -5,7 +5,6 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
-	"strconv"
 	"strings"
 
 	"github.com/jlry-dev/whirl/internal/model/dto"
@@ -161,13 +160,6 @@ func (h *FriendshipHandlr) RetrieveFriends(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	typeHeader := strings.Split(r.Header.Get("Content-Type"), ";")
-	if typeHeader[0] != "application/json" {
-		h.logger.Error("retrieve friend unsupported media format", slog.String("METHOD", r.Method), slog.String("PATH", r.URL.Path))
-		h.rspHandler.Error(w, http.StatusUnsupportedMediaType, http.StatusText(http.StatusUnsupportedMediaType), nil)
-		return
-	}
-
 	userID, ok := ctx.Value("userID").(int)
 	if !ok {
 		h.logger.Error("retrieve friend: failed to get the userID value out of ctx", slog.String("METHOD", r.Method), slog.String("PATH", r.URL.Path))
@@ -175,17 +167,15 @@ func (h *FriendshipHandlr) RetrieveFriends(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	page, err := strconv.Atoi(r.URL.Query().Get("page"))
+	page, err := pageFromQuery(r)
 	if err != nil {
-		h.logger.Error(err.Error(), slog.String("METHOD", r.Method), slog.String("PATH", r.URL.Path))
+		h.logger.Error("retrieve friend: invalid page parameter",
+			slog.String("page", r.URL.Query().Get("page")),
+			slog.String("METHOD", r.Method),
+			slog.String("PATH", r.URL.Path))
 
-		h.rspHandler.Error(w, http.StatusBadRequest, http.StatusText(http.StatusBadRequest), nil)
+		h.rspHandler.Error(w, http.StatusBadRequest, errInvalidPage.Error(), nil)
 		return
-	}
-
-	if page == 0 {
-		// default
-		page = 1
 	}
 
 	dto, err := h.frSrv.RetrieveFriends(ctx, userID, page)

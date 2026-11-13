@@ -56,17 +56,15 @@ func (h *MessageHandlr) RetrieveMessages(w http.ResponseWriter, r *http.Request)
 
 	}
 
-	page, err := strconv.Atoi(r.URL.Query().Get("page"))
+	page, err := pageFromQuery(r)
 	if err != nil {
-		h.logger.Error("retrieve message: failed to convert page to int", slog.String("METHOD", r.Method), slog.String("PATH", r.URL.Path))
+		h.logger.Error("retrieve message: invalid page parameter",
+			slog.String("page", r.URL.Query().Get("page")),
+			slog.String("METHOD", r.Method),
+			slog.String("PATH", r.URL.Path))
 
-		h.rspHandler.Error(w, http.StatusBadRequest, http.StatusText(http.StatusBadRequest), nil)
+		h.rspHandler.Error(w, http.StatusBadRequest, errInvalidPage.Error(), nil)
 		return
-	}
-
-	if page == 0 {
-		// default
-		page = 1
 	}
 
 	dto, err := h.srv.RetreiveMessages(ctx, pOne, pTwo, page)
