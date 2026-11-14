@@ -98,11 +98,11 @@ func (f *FriendshipRepo) GetFriends(ctx context.Context, qr Queryer, userID, pag
 		    SELECT f.user2_id
 		    FROM friendship f
 		    WHERE f.user1_id = $1 AND f.status <> 'blocked'
-		LIMIT $2
-		)`
+		)
+		ORDER BY au.id ASC
+		LIMIT $2 OFFSET $3`
 
-	p := 10 * page
-	rows, err := qr.Query(ctx, qry, userID, p)
+	rows, err := qr.Query(ctx, qry, userID, pageSize, offsetForPage(page))
 	if err != nil {
 		return nil, fmt.Errorf("repo: failed to get friends : %w", err)
 	}
