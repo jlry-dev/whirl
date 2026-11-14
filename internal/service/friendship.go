@@ -14,7 +14,10 @@ import (
 	"github.com/jlry-dev/whirl/internal/util"
 )
 
-var ErrNoFriendshipExist = errors.New("service: no friendship exist")
+var (
+	ErrNoFriendshipExist = errors.New("service: no friendship exist")
+	ErrFriendshipExists  = errors.New("service: friendship already exists")
+)
 
 type FriendshipService interface {
 	AddFriend(context.Context, *dto.FriendshipDTO) error
@@ -48,7 +51,11 @@ func (srv *FriendshipSrv) AddFriend(ctx context.Context, data *dto.FriendshipDTO
 		UID_2: data.To,
 	}
 
-	tx, _ := srv.db.Begin(ctx)
+	tx, err := srv.db.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("service: failed to begin transaction: %w", err)
+	}
+
 	defer func() {
 		_ = tx.Rollback(context.Background())
 	}()
@@ -65,10 +72,16 @@ func (srv *FriendshipSrv) AddFriend(ctx context.Context, data *dto.FriendshipDTO
 
 	err = srv.frRepo.CreateFriendship(ctx, tx, fr)
 	if err != nil {
+		if errors.Is(err, repository.ErrDuplicateFriendship) {
+			return ErrFriendshipExists
+		}
+
 		return fmt.Errorf("service: failed to create friendship: %w", err)
 	}
 
-	tx.Commit(ctx)
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("service: failed to commit friendship: %w", err)
+	}
 
 	return nil
 }

@@ -35,7 +35,13 @@ CREATE TABLE "friendship" (
   "user2_id" int NOT NULL,
   "status" friendship_status NOT NULL DEFAULT 'accepted',
   "created_at" timestamp NOT NULL DEFAULT (now()),
-  PRIMARY KEY ("user1_id", "user2_id")
+
+  -- A friendship is an unordered pair. Storing it in canonical order
+  -- (user1_id < user2_id) means (a, b) and (b, a) are the same primary key,
+  -- so the key encodes the identity of the relationship, not one direction
+  -- of it. The CHECK also rules out self-friendships.
+  PRIMARY KEY ("user1_id", "user2_id"),
+  CONSTRAINT "friendship_ordered" CHECK ("user1_id" < "user2_id")
 );
 
 CREATE TABLE "message" (

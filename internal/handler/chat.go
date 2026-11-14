@@ -124,15 +124,40 @@ type Client struct {
 	randomPair *Client
 }
 
+// pairKey identifies the two participants of a friendship in a canonical
+// order, so (a, b) and (b, a) address the same entry.
+type pairKey struct {
+	low  int
+	high int
+}
+
+func newPairKey(a, b int) pairKey {
+	if a > b {
+		a, b = b, a
+	}
+
+	return pairKey{low: a, high: b}
+}
+
+// pendingRequest is an unanswered friend request for a pair. The pair itself is
+// the map key, so only the requester has to be stored; no *Client is kept and
+// a reconnect cannot leave a stale pointer behind.
+type pendingRequest struct {
+	from int
+}
+
 type Hub struct {
 	frSrv  service.FriendshipService
 	msgSrv service.MessageService
 	logger *slog.Logger
 
-	clientMU       sync.RWMutex
-	clients        map[string]*Client
+	clientMU sync.RWMutex
+	clients  map[string]*Client
+
+	// friendMU guards friendRequests. It is a leaf lock: no other Hub or
+	// database call is made while it is held.
 	friendMU       sync.RWMutex
-	friendRequests map[string]*Client
+	friendRequests map[pairKey]pendingRequest
 
 	// queue is owned by the matchmaker, but queueMU is also taken by the
 	// disconnect path so a client can always be removed from the queue.
@@ -154,7 +179,7 @@ func NewHub(frSrv service.FriendshipService, msgSrv service.MessageService, logg
 
 		logger:         logger,
 		clients:        make(map[string]*Client, 32),
-		friendRequests: make(map[string]*Client, 4),
+		friendRequests: make(map[pairKey]pendingRequest, 4),
 		queue:          []*Client{},
 
 		shards:       newShardPool(hubShardCount, hubShardQueueSize, logger),
@@ -354,6 +379,9 @@ func (h *Hub) detach(c *Client) {
 	// LeaveRandom is safe here because it takes queueMU, which is also taken by
 	// the matchmaker around every queue/pair mutation.
 	h.LeaveRandom(c)
+
+	// Unanswered requests die with the session that made them.
+	h.clearPendingFor(c.userID.Int())
 
 	c.close()
 }
@@ -682,8 +710,8 @@ func (h *Hub) handleRandomMessage(m *Message) {
 }
 
 func (h *Hub) handleFriendRequest(m *Message) {
-	sender, sOnline := h.clientByID(m.From)
-	if !sOnline {
+	sender, online := h.clientByID(m.From)
+	if !online {
 		return
 	}
 
@@ -697,59 +725,110 @@ func (h *Hub) handleFriendRequest(m *Message) {
 		return
 	}
 
+	// The receiver always comes from server-side pair state, never the client.
 	m.To = pair.userID.Int()
+	if m.To == m.From {
+		return
+	}
 
-	receiver, rOnline := h.clientByID(m.To)
-	senderID := strconv.Itoa(m.From)
-	receiverID := strconv.Itoa(m.To)
+	receiver, receiverOnline := h.clientByID(m.To)
+	key := newPairKey(m.From, m.To)
 
+	h.friendMU.Lock()
+
+	if !receiverOnline {
+		// A request cannot be answered while the other user is offline. Only
+		// this pair is dropped, never the sender's requests elsewhere.
+		delete(h.friendRequests, key)
+		h.friendMU.Unlock()
+		return
+	}
+
+	pending, exists := h.friendRequests[key]
+
+	if !exists {
+		h.friendRequests[key] = pendingRequest{from: m.From}
+		h.friendMU.Unlock()
+
+		receiver.enqueue(&Message{Type: "friend_request"})
+		return
+	}
+
+	if pending.from == m.From {
+		// The same user asked twice. Do not write anything; re-ask the other
+		// side so the request stays visible.
+		h.friendMU.Unlock()
+
+		receiver.enqueue(&Message{Type: "friend_request"})
+		return
+	}
+
+	// pending.from == m.To: both participants asked. Claim the request before
+	// touching the database so a concurrent acceptance cannot insert twice.
+	delete(h.friendRequests, key)
+	h.friendMU.Unlock()
+
+	h.acceptFriendRequest(key, m.From, m.To, sender, receiver)
+}
+
+// acceptFriendRequest stores the friendship after the pending request has been
+// claimed. It runs without friendMU held, so a slow query cannot stall other
+// friend requests.
+func (h *Hub) acceptFriendRequest(key pairKey, from, to int, sender, receiver *Client) {
+	if h.frSrv == nil {
+		h.restorePending(key, pendingRequest{from: to})
+		h.notifyFriendRequestFailed(sender, receiver)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), hubDBTimeout)
+	defer cancel()
+
+	err := h.frSrv.AddFriend(ctx, &dto.FriendshipDTO{
+		From: from,
+		To:   to,
+	})
+	if err != nil && !errors.Is(err, service.ErrFriendshipExists) {
+		h.logger.Error("friend request: failed to create friendship", slog.String("error", err.Error()))
+
+		// Let the pair retry: put the original request back unless a newer one
+		// already took the slot.
+		h.restorePending(key, pendingRequest{from: to})
+		h.notifyFriendRequestFailed(sender, receiver)
+		return
+	}
+
+	sender.enqueue(&Message{Type: "friend_request_success"})
+	receiver.enqueue(&Message{Type: "friend_request_success"})
+}
+
+// restorePending returns a claimed request to the map. A newer request for the
+// same pair is never overwritten.
+func (h *Hub) restorePending(key pairKey, req pendingRequest) {
 	h.friendMU.Lock()
 	defer h.friendMU.Unlock()
 
-	if !rOnline {
-		// Clear any request made by either participant
-		delete(h.friendRequests, receiverID)
-		delete(h.friendRequests, senderID)
-		return
+	if _, exists := h.friendRequests[key]; !exists {
+		h.friendRequests[key] = req
 	}
+}
 
-	// Check if the receiver has a pending friend request. If so, accept it.
-	if _, pending := h.friendRequests[receiverID]; pending {
-		ctx, cancel := context.WithTimeout(context.Background(), hubDBTimeout)
-		defer cancel()
+// clearPendingFor drops every pending request involving userID. Unanswered
+// requests must not outlive the session that made or received them.
+func (h *Hub) clearPendingFor(userID int) {
+	h.friendMU.Lock()
+	defer h.friendMU.Unlock()
 
-		// Save to database
-		err := h.frSrv.AddFriend(ctx, &dto.FriendshipDTO{
-			From: m.From,
-			To:   m.To,
-		})
-		if err != nil {
-			sender.enqueue(&Message{
-				Type: "friend_request_failed",
-			})
-
-			receiver.enqueue(&Message{
-				Type: "friend_request_failed",
-			})
-			return
+	for key := range h.friendRequests {
+		if key.low == userID || key.high == userID {
+			delete(h.friendRequests, key)
 		}
-
-		// Notify
-		sender.enqueue(&Message{
-			Type: "friend_request_success",
-		})
-
-		receiver.enqueue(&Message{
-			Type: "friend_request_success",
-		})
-
-		return
 	}
+}
 
-	h.friendRequests[senderID] = receiver
-	receiver.enqueue(&Message{
-		Type: "friend_request",
-	})
+func (h *Hub) notifyFriendRequestFailed(sender, receiver *Client) {
+	sender.enqueue(&Message{Type: "friend_request_failed"})
+	receiver.enqueue(&Message{Type: "friend_request_failed"})
 }
 
 func (c *Client) WriteMessage() {
