@@ -104,7 +104,11 @@ func (srv *UserSrv) UpdateAvatar(ctx context.Context, data *dto.UpdateAvatarDTO)
 			}
 
 			// begin transaction
-			tx, _ := srv.db.Begin(ctx)
+			tx, err := srv.db.Begin(ctx)
+			if err != nil {
+				return &dto.UpdateAvatarSuccessDTO{}, fmt.Errorf("service: failed to begin avatar transaction: %w", err)
+			}
+
 			defer func() {
 				_ = tx.Rollback(context.Background())
 			}()
@@ -134,7 +138,7 @@ func (srv *UserSrv) UpdateAvatar(ctx context.Context, data *dto.UpdateAvatarDTO)
 
 			err = tx.Commit(ctx)
 			if err != nil {
-				return &dto.UpdateAvatarSuccessDTO{}, fmt.Errorf("service: faield to update user avatar : %w", err)
+				return &dto.UpdateAvatarSuccessDTO{}, fmt.Errorf("service: failed to update user avatar : %w", err)
 			}
 
 			return &dto.UpdateAvatarSuccessDTO{
