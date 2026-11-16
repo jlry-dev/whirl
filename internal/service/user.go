@@ -10,6 +10,7 @@ import (
 	"image/png"
 	"log/slog"
 	"os"
+	"time"
 
 	"github.com/ajdnik/imghash"
 	"github.com/cloudinary/cloudinary-go/v2"
@@ -103,6 +104,25 @@ func (srv *UserSrv) UpdateAvatar(ctx context.Context, data *dto.UpdateAvatarDTO)
 				return nil, fmt.Errorf("service: cloudinary rejected upload: %s", cldRsp.Error.Message)
 			}
 
+			// The asset is only kept if it ends up referenced by a committed row.
+			// Every other path (DB error, rollback, lost dedup race) would leave it
+			// orphaned in Cloudinary, so release it here.
+			keepAsset := false
+			defer func() {
+				if keepAsset {
+					return
+				}
+
+				// The request context may already be cancelled on the error paths.
+				dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+				defer cancel()
+
+				if _, derr := srv.cld.Upload.Destroy(dctx, uploader.DestroyParams{PublicID: pid}); derr != nil {
+					srv.logger.Error("service: failed to clean up unused avatar upload",
+						slog.String("public_id", pid), slog.Any("error", derr))
+				}
+			}()
+
 			// begin transaction
 			tx, err := srv.db.Begin(ctx)
 			if err != nil {
@@ -121,14 +141,14 @@ func (srv *UserSrv) UpdateAvatar(ctx context.Context, data *dto.UpdateAvatarDTO)
 			}
 
 			// Insert avatar info to db
-			avatarData, err := srv.avatarRepo.CreateAvatar(ctx, tx, avatar)
+			createdAvatar, err := srv.avatarRepo.CreateAvatar(ctx, tx, avatar)
 			if err != nil {
 				return &dto.UpdateAvatarSuccessDTO{}, fmt.Errorf("service: failed to update user avatar : %w", err)
 			}
 
 			user := &model.User{
 				ID:       data.UserID,
-				AvatarID: avatarData.ID,
+				AvatarID: createdAvatar.ID,
 			}
 
 			err = srv.userRepo.UpdateAvatar(ctx, tx, user)
@@ -141,8 +161,12 @@ func (srv *UserSrv) UpdateAvatar(ctx context.Context, data *dto.UpdateAvatarDTO)
 				return &dto.UpdateAvatarSuccessDTO{}, fmt.Errorf("service: failed to update user avatar : %w", err)
 			}
 
+			// If another request won the dedup race, the committed row points at
+			// that request's asset and ours is released by the deferred cleanup.
+			keepAsset = createdAvatar.PublicID == pid
+
 			return &dto.UpdateAvatarSuccessDTO{
-				AvatarURL: avatarData.URL,
+				AvatarURL: createdAvatar.URL,
 			}, nil
 
 		}
