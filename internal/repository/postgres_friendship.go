@@ -54,9 +54,11 @@ func (f *FriendshipRepo) CreateFriendship(ctx context.Context, qr Queryer, fr *m
 }
 
 func (f *FriendshipRepo) DeleteFriendship(ctx context.Context, qr Queryer, fr *model.Friendship) error {
-	qry := `DELETE FROM "friendship" as f WHERE (f.user1_id = $1 AND f.user2_id = $2) OR (f.user1_id = $2 AND f.user2_id = $1)`
+	user1, user2 := normalizePair(fr.UID_1, fr.UID_2)
 
-	result, err := qr.Exec(ctx, qry, fr.UID_1, fr.UID_2)
+	qry := `DELETE FROM "friendship" WHERE "user1_id" = $1 AND "user2_id" = $2`
+
+	result, err := qr.Exec(ctx, qry, user1, user2)
 	if err != nil {
 		return fmt.Errorf("repo: failed to delete friendship : %w", err)
 	}
@@ -69,11 +71,13 @@ func (f *FriendshipRepo) DeleteFriendship(ctx context.Context, qr Queryer, fr *m
 }
 
 func (f *FriendshipRepo) UpdateFriendshipStatus(ctx context.Context, qr Queryer, fr *model.Friendship) error {
-	qry := `UPDATE friendship
-		SET status = $1
-		WHERE (user1_id = $2 AND user2_id = $3) OR (user1_id = $3 AND user2_id = $2)`
+	user1, user2 := normalizePair(fr.UID_1, fr.UID_2)
 
-	result, err := qr.Exec(ctx, qry, fr.Status, fr.UID_1, fr.UID_2)
+	qry := `UPDATE "friendship"
+		SET "status" = $1
+		WHERE "user1_id" = $2 AND "user2_id" = $3`
+
+	result, err := qr.Exec(ctx, qry, fr.Status, user1, user2)
 	if err != nil {
 		return fmt.Errorf("repo: failed to update friendship : %w", err)
 	}
@@ -127,13 +131,15 @@ func (f *FriendshipRepo) GetFriends(ctx context.Context, qr Queryer, userID, pag
 }
 
 func (f *FriendshipRepo) CheckRelationship(ctx context.Context, qr Queryer, fr *model.Friendship) (bool, error) {
+	user1, user2 := normalizePair(fr.UID_1, fr.UID_2)
+
 	qry := `SELECT EXISTS (
-		SELECT 1 FROM "friendship" AS f
-		WHERE (f.user1_id = $1 AND f.user2_id = $2) OR (f.user1_id = $2 AND f.user2_id = $1)
+		SELECT 1 FROM "friendship"
+		WHERE "user1_id" = $1 AND "user2_id" = $2
 	)`
 
 	var exists bool
-	if err := qr.QueryRow(ctx, qry, fr.UID_1, fr.UID_2).Scan(&exists); err != nil {
+	if err := qr.QueryRow(ctx, qry, user1, user2).Scan(&exists); err != nil {
 		return false, fmt.Errorf("repo: failed to check friendship : %w", err)
 	}
 
