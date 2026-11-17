@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/jlry-dev/whirl/internal/config"
 	"github.com/jlry-dev/whirl/internal/model/dto"
 	"github.com/jlry-dev/whirl/internal/service"
 )
@@ -45,26 +46,62 @@ func (u uid) Int() int {
 
 type ChatHandler interface {
 	SocketConnect(w http.ResponseWriter, r *http.Request)
+	IssueTicket(w http.ResponseWriter, r *http.Request)
 }
 
 type ChatHandlr struct {
 	hub        *Hub
 	rspHandler *ResponseHandler
 	logger     *slog.Logger
+	upgrader   websocket.Upgrader
+	tickets    *TicketStore
 }
 
-func NewChatHandler(logger *slog.Logger, rspHandler *ResponseHandler, hub *Hub) ChatHandler {
+func NewChatHandler(logger *slog.Logger, rspHandler *ResponseHandler, hub *Hub, policy *config.OriginPolicy, tickets *TicketStore) ChatHandler {
 	return &ChatHandlr{
 		logger:     logger,
 		rspHandler: rspHandler,
 		hub:        hub,
+		tickets:    tickets,
+		upgrader: websocket.Upgrader{
+			// Pages lang from a configured frontend origin ang pwede mo open
+			// ug WebSocket. Browser always sends Origin; walay Origin = dili
+			// browser, so wala ta ga-check sa same-origin policy.
+			CheckOrigin: func(r *http.Request) bool {
+				return policy.Allows(r.Header.Get("Origin"))
+			},
+		},
 	}
 }
 
-var upgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool {
-		return true // TODO: create a proper origin check
-	},
+// IssueTicket gives the browser a short-lived single-use ticket for the
+// handshake. Dili man kabutang ug Authorization header ang browser sa
+// WebSocket, so kani ang gamiton instead of the JWT sa URL.
+func (h *ChatHandlr) IssueTicket(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		h.logger.Error("websocket ticket: invalid http method", slog.String("METHOD", r.Method), slog.String("PATH", r.URL.Path))
+		h.rspHandler.Error(w, http.StatusMethodNotAllowed, http.StatusText(http.StatusMethodNotAllowed), nil)
+		return
+	}
+
+	userID, ok := r.Context().Value("userID").(int)
+	if !ok {
+		h.logger.Error("websocket ticket: failed to get the userID value out of ctx", slog.String("METHOD", r.Method), slog.String("PATH", r.URL.Path))
+		h.rspHandler.Error(w, http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError), nil)
+		return
+	}
+
+	ticket, err := h.tickets.Issue(userID)
+	if err != nil {
+		h.logger.Error("websocket ticket: failed to issue ticket", slog.Any("error", err))
+		h.rspHandler.Error(w, http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError), nil)
+		return
+	}
+
+	h.rspHandler.JSON(w, http.StatusOK, dto.TicketResponse{
+		Ticket:    ticket,
+		ExpiresIn: int(TicketTTL / time.Second),
+	})
 }
 
 func (h *ChatHandlr) SocketConnect(w http.ResponseWriter, r *http.Request) {
@@ -74,7 +111,7 @@ func (h *ChatHandlr) SocketConnect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ws, err := upgrader.Upgrade(w, r, nil)
+	ws, err := h.upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		if errors.Is(err, websocket.ErrBadHandshake) {
 			h.rspHandler.Error(w, http.StatusBadRequest, "bad request trying to upgrade connection", nil)

@@ -45,12 +45,13 @@ func main() {
 	rspHandler := handler.NewResponseHandler(srvConfig.Logger)
 	authHandlr := handler.NewAuthHandler(authSrv, rspHandler, srvConfig.Logger)
 	userHandlr := handler.NewUserHandler(userSrv, srvConfig.Logger)
-	chatHandlr := handler.NewChatHandler(srvConfig.Logger, rspHandler, hub)
+	ticketStore := handler.NewTicketStore(handler.TicketTTL)
+	chatHandlr := handler.NewChatHandler(srvConfig.Logger, rspHandler, hub, srvConfig.Origins, ticketStore)
 	frHandlr := handler.NewFriendshipHandler(srvConfig.Logger, rspHandler, frSrv)
 	msgHandlr := handler.NewMessageHandler(msgSrv, rspHandler, srvConfig.Logger)
 
 	// Middleware
-	m := middleware.NewMiddleware(rspHandler, srvConfig.Logger)
+	m := middleware.NewMiddleware(rspHandler, srvConfig.Logger, srvConfig.Origins, ticketStore)
 
 	// Multiplexer
 	mux := http.NewServeMux()
@@ -70,6 +71,7 @@ func main() {
 	mux.HandleFunc("GET /messages/{id}", m.Authenticator(msgHandlr.RetrieveMessages))
 
 	// Chat Matcher Worker
+	mux.HandleFunc("POST /websocket/ticket", m.Authenticator(chatHandlr.IssueTicket))
 	mux.HandleFunc("/websocket/connect", m.Authenticator(chatHandlr.SocketConnect))
 
 	// Add middlewares to every request

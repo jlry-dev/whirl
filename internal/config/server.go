@@ -13,6 +13,7 @@ import (
 type Config struct {
 	Logger   *slog.Logger
 	Validate *validator.Validate
+	Origins  *OriginPolicy
 }
 
 func Load() Config {
@@ -33,5 +34,6 @@ func Load() Config {
 	return Config{
 		Logger:   l,
 		Validate: v,
+		Origins:  LoadOriginPolicy(l),
 	}
 }

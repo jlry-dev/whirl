@@ -5,11 +5,11 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/jlry-dev/whirl/internal/config"
 	"github.com/jlry-dev/whirl/internal/handler"
 	"github.com/jlry-dev/whirl/internal/util"
 )
@@ -20,29 +20,29 @@ type Middleware interface {
 }
 
 type middlewareStruct struct {
-	rsp    *handler.ResponseHandler
-	logger *slog.Logger
+	rsp     *handler.ResponseHandler
+	logger  *slog.Logger
+	policy  *config.OriginPolicy
+	tickets *handler.TicketStore
 }
 
-func NewMiddleware(rsp *handler.ResponseHandler, logger *slog.Logger) Middleware {
+func NewMiddleware(rsp *handler.ResponseHandler, logger *slog.Logger, policy *config.OriginPolicy, tickets *handler.TicketStore) Middleware {
 	return &middlewareStruct{
-		rsp:    rsp,
-		logger: logger,
+		rsp:     rsp,
+		logger:  logger,
+		policy:  policy,
+		tickets: tickets,
 	}
 }
 
 func (m *middlewareStruct) CorsMiddleware(next http.Handler) http.Handler {
-	allowedOrigins := parseAllowedOrigins(os.Getenv("FRONTEND_ADDRESS"))
-	allowAll := len(allowedOrigins) == 0
-
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
 		m.logger.Info("request has been made", slog.String("origin", origin))
 
-		// CORS only applies to requests that carry an Origin header. Non-browser
-		// clients (curl, health checks, server-to-server) send none and must not
-		// be rejected. OPTIONS is still answered here because Go's method-based
-		// ServeMux patterns would otherwise return 405 for preflight requests.
+		// CORS only applies kung naay Origin header. Non-browser clients
+		// (curl, health checks) wala man, so dili dapat i-reject. OPTIONS
+		// is answered here kay ang ServeMux mo 405 sa preflight.
 		if origin == "" {
 			if r.Method == http.MethodOptions {
 				w.WriteHeader(http.StatusNoContent)
@@ -52,9 +52,8 @@ func (m *middlewareStruct) CorsMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		allowedOrigin, ok := resolveOrigin(origin, allowedOrigins, allowAll)
-		if !ok {
-			// Add no CORS headers so the browser blocks the response.
+		if !m.policy.Allows(origin) {
+			// No CORS headers, para ma block sa browser.
 			if r.Method == http.MethodOptions {
 				w.WriteHeader(http.StatusNoContent)
 				return
@@ -63,12 +62,9 @@ func (m *middlewareStruct) CorsMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		// Set the header exactly once. Setting it again later would overwrite the
-		// value computed here, which is how the previous implementation broke
-		// allow-all mode.
-		w.Header().Set("Access-Control-Allow-Origin", allowedOrigin)
-		// Reflected origins make the response vary by Origin, so shared caches
-		// must key on it.
+		// Echo the exact origin. Never "*", ug ayaw ibutang ang configured
+		// value kay ang shared cache dapat mo key sa request origin.
+		w.Header().Set("Access-Control-Allow-Origin", origin)
 		w.Header().Add("Vary", "Origin")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
@@ -83,85 +79,85 @@ func (m *middlewareStruct) CorsMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// parseAllowedOrigins splits a comma-separated FRONTEND_ADDRESS into a set of
-// allowed origins. An empty value means "allow any origin".
-func parseAllowedOrigins(raw string) map[string]struct{} {
-	allowed := make(map[string]struct{})
-	for _, part := range strings.Split(raw, ",") {
-		origin := strings.TrimSpace(part)
-		// The Origin header never includes a trailing slash, so normalize the
-		// configured value instead of the request.
-		origin = strings.TrimRight(origin, "/")
-		if origin != "" {
-			allowed[origin] = struct{}{}
-		}
-	}
-	return allowed
-}
+// websocketConnectPath is the only route nga pwede mo auth via URL,
+// kay dili man kabutang header ang browser sa WebSocket handshake.
+const websocketConnectPath = "/websocket/connect"
 
-// resolveOrigin returns the value for Access-Control-Allow-Origin and whether
-// the request origin is permitted.
-func resolveOrigin(origin string, allowed map[string]struct{}, allowAll bool) (string, bool) {
-	if allowAll {
-		return "*", true
-	}
-	if _, ok := allowed[origin]; ok {
-		return origin, true
-	}
-	return "", false
-}
+// userIDKey is the context key used by the handlers.
+// String lang ni for historical reasons; changing it would touch every handler.
+const userIDKey = "userID"
 
 func (m *middlewareStruct) Authenticator(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		ctx := r.Context()
-
-		var tokenStr string
-
 		authHeader := r.Header.Get("Authorization")
-		bearerSlice := strings.Fields(authHeader)
 
-		if len(bearerSlice) < 2 || len(bearerSlice) > 2 || bearerSlice[0] != "Bearer" {
-			// Check for websockets fallback
-			wsToken := r.URL.Query().Get("token")
-
-			if wsToken == "" {
+		// If naa Authorization header, dapat valid jud. Ayaw fallback sa
+		// query, kay mao na ang rason nga naay JWT sa URL before.
+		if authHeader != "" {
+			parts := strings.Fields(authHeader)
+			if len(parts) != 2 || parts[0] != "Bearer" || parts[1] == "" {
+				m.logger.Error("auth: malformed authorization header", slog.String("METHOD", r.Method), slog.String("PATH", r.URL.Path))
 				m.rsp.Error(w, http.StatusUnauthorized, "invalid token", nil)
 				return
 			}
 
-			tokenStr = wsToken
-		} else {
-			tokenStr = bearerSlice[1]
+			m.authenticate(w, r, parts[1], next)
+			return
 		}
 
-		// parse the claims of the token
-		token, err := util.ParseJWT(ctx, tokenStr)
-		if err != nil {
-			m.logger.Error(err.Error(), slog.String("METHOD", r.Method), slog.String("PATH", r.URL.Path))
-			if errors.Is(err, jwt.ErrTokenExpired) {
-				m.rsp.Error(w, http.StatusUnauthorized, "token expired", nil)
-				return
-			}
+		// WebSocket ra ang pwede mo auth via URL, kay dili man kabutang
+		// header ang browser sa handshake. Other routes, header lang jud.
+		if r.URL.Path != websocketConnectPath {
 			m.rsp.Error(w, http.StatusUnauthorized, "invalid token", nil)
 			return
 		}
 
-		sub, err := token.Claims.GetSubject()
-		if err != nil {
-			m.logger.Error(err.Error(), slog.String("METHOD", r.Method), slog.String("PATH", r.URL.Path))
-			m.rsp.Error(w, http.StatusUnauthorized, "invalid token", nil)
+		// Ticket na lang. Single use ni and 30s ra, so wala nay gamit
+		// kung ma-log ang URL.
+		ticket := r.URL.Query().Get("ticket")
+		if ticket == "" {
+			m.rsp.Error(w, http.StatusUnauthorized, "invalid ticket", nil)
 			return
 		}
 
-		userID, err := strconv.Atoi(sub)
-		if err != nil {
-			m.logger.Error(err.Error(), slog.String("METHOD", r.Method), slog.String("PATH", r.URL.Path))
-			m.rsp.Error(w, http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError), nil)
+		userID, ok := m.tickets.Consume(ticket)
+		if !ok {
+			m.rsp.Error(w, http.StatusUnauthorized, "invalid ticket", nil)
 			return
 		}
 
-		nCtx := context.WithValue(ctx, "userID", userID)
-		r2 := r.WithContext(nCtx)
-		next(w, r2)
+		next(w, r.WithContext(context.WithValue(r.Context(), userIDKey, userID)))
 	}
+}
+
+func (m *middlewareStruct) authenticate(w http.ResponseWriter, r *http.Request, tokenStr string, next http.HandlerFunc) {
+	ctx := r.Context()
+
+	// parse the claims of the token
+	token, err := util.ParseJWT(ctx, tokenStr)
+	if err != nil {
+		m.logger.Error(err.Error(), slog.String("METHOD", r.Method), slog.String("PATH", r.URL.Path))
+		if errors.Is(err, jwt.ErrTokenExpired) {
+			m.rsp.Error(w, http.StatusUnauthorized, "token expired", nil)
+			return
+		}
+		m.rsp.Error(w, http.StatusUnauthorized, "invalid token", nil)
+		return
+	}
+
+	sub, err := token.Claims.GetSubject()
+	if err != nil {
+		m.logger.Error(err.Error(), slog.String("METHOD", r.Method), slog.String("PATH", r.URL.Path))
+		m.rsp.Error(w, http.StatusUnauthorized, "invalid token", nil)
+		return
+	}
+
+	userID, err := strconv.Atoi(sub)
+	if err != nil {
+		m.logger.Error(err.Error(), slog.String("METHOD", r.Method), slog.String("PATH", r.URL.Path))
+		m.rsp.Error(w, http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError), nil)
+		return
+	}
+
+	next(w, r.WithContext(context.WithValue(ctx, userIDKey, userID)))
 }
