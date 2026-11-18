@@ -3,7 +3,6 @@ package service_test
 import (
 	"context"
 	"errors"
-	"os"
 	"reflect"
 	"testing"
 
@@ -21,13 +20,13 @@ import (
 	"github.com/jlry-dev/whirl/test/mocks"
 )
 
+// testJWTKey is long enough for HS256.
+const testJWTKey = "test-key-at-least-32-bytes-long-1234"
+
 func Test_Register(t *testing.T) {
 	vld := validator.New(validator.WithRequiredStructEnabled())
 	vld.RegisterValidation("age", util.ValidAgeValidator)
 	vld.RegisterValidation("dateformat", util.DateFormatValidator)
-
-	// Setup env variables
-	os.Setenv("JWT_KEY", "testkey")
 
 	testCase := []struct {
 		name      string
@@ -473,7 +472,7 @@ func Test_Register(t *testing.T) {
 			tc.mockSetup(userRepo, countryRepo)
 
 			// create a new service
-			srv := service.NewAuthService(vld, userRepo, countryRepo, nil)
+			srv := service.NewAuthService(vld, userRepo, countryRepo, nil, []byte(testJWTKey))
 			resp, err := srv.Register(context.Background(), tc.inp)
 
 			if tc.wantErr {
@@ -615,7 +614,7 @@ func Test_Login(t *testing.T) {
 
 			tc.mockSetup(&userRepo)
 
-			srv := service.NewAuthService(vld, &userRepo, nil, nil)
+			srv := service.NewAuthService(vld, &userRepo, nil, nil, []byte(testJWTKey))
 
 			resp, err := srv.Login(context.Background(), tc.inp)
 

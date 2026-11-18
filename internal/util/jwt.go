@@ -2,27 +2,37 @@ package util
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"os"
 	"strconv"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 )
 
-func GenerateJWT(ctx context.Context, subject int) (string, error) {
-	var key []byte
+// 24h ra ang token. Wala pa tay revocation, so ang expiry ra ang nag-limit
+// kung unsa kadugay magamit ang stolen token.
+const (
+	TokenTTL      = 24 * time.Hour
+	tokenIssuer   = "whirl"
+	tokenAudience = "whirl-api"
+)
 
-	if k := os.Getenv("JWT_KEY"); k == "" {
-		panic("JWT_KEY env var is missing")
-	} else {
-		key = []byte(k)
+var ErrMissingJWTKey = errors.New("util: JWT key is empty")
+
+func GenerateJWT(ctx context.Context, key []byte, subject int) (string, error) {
+	if len(key) == 0 {
+		return "", ErrMissingJWTKey
 	}
 
+	now := time.Now()
+
 	claims := jwt.RegisteredClaims{
+		Issuer:    tokenIssuer,
 		Subject:   strconv.Itoa(subject),
-		ExpiresAt: jwt.NewNumericDate(time.Now().Add(14 * 24 * time.Hour)),
-		IssuedAt:  jwt.NewNumericDate(time.Now()),
+		Audience:  jwt.ClaimStrings{tokenAudience},
+		ExpiresAt: jwt.NewNumericDate(now.Add(TokenTTL)),
+		IssuedAt:  jwt.NewNumericDate(now),
 	}
 
 	uToken := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
@@ -39,12 +49,22 @@ This helper function parses the given token string
 
 Returns the token struct
 */
-func ParseJWT(ctx context.Context, token string) (*jwt.Token, error) {
+func ParseJWT(ctx context.Context, key []byte, token string) (*jwt.Token, error) {
+	if len(key) == 0 {
+		return nil, ErrMissingJWTKey
+	}
+
 	t, err := jwt.Parse(token, func(t *jwt.Token) (any, error) {
-		return []byte(os.Getenv("JWT_KEY")), nil
-	}, jwt.WithExpirationRequired())
+		return key, nil
+	},
+		jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}),
+		jwt.WithExpirationRequired(),
+		jwt.WithIssuer(tokenIssuer),
+		jwt.WithAudience(tokenAudience),
+		jwt.WithLeeway(30*time.Second),
+	)
 	if err != nil {
-		return new(jwt.Token), err
+		return nil, err
 	}
 
 	return t, nil

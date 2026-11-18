@@ -40,14 +40,16 @@ type AuthSrv struct {
 	userRepo    repository.UserRepository
 	countryRepo repository.CountryRepository
 	db          *pgxpool.Pool
+	jwtKey      []byte
 }
 
-func NewAuthService(validate *validator.Validate, userRepo repository.UserRepository, countryRepo repository.CountryRepository, db *pgxpool.Pool) AuthService {
+func NewAuthService(validate *validator.Validate, userRepo repository.UserRepository, countryRepo repository.CountryRepository, db *pgxpool.Pool, jwtKey []byte) AuthService {
 	return &AuthSrv{
 		validate:    validate,
 		userRepo:    userRepo,
 		countryRepo: countryRepo,
 		db:          db,
+		jwtKey:      jwtKey,
 	}
 }
 
@@ -107,7 +109,7 @@ func (srv *AuthSrv) Register(ctx context.Context, data *dto.RegisterDTO) (*dto.R
 		return nil, fmt.Errorf("reg service : failed to create user : %w", err)
 	}
 
-	token, err := util.GenerateJWT(ctx, uid)
+	token, err := util.GenerateJWT(ctx, srv.jwtKey, uid)
 	if err != nil {
 		return nil, fmt.Errorf("reg service : failed to generate token : %w", err)
 	}
@@ -158,7 +160,7 @@ func (srv *AuthSrv) Login(ctx context.Context, data *dto.LoginDTO) (*dto.LoginSu
 		return nil, fmt.Errorf("login service: failed trying to match password : %w", err)
 	}
 
-	token, err := util.GenerateJWT(ctx, userInfo.ID)
+	token, err := util.GenerateJWT(ctx, srv.jwtKey, userInfo.ID)
 	if err != nil {
 		return nil, fmt.Errorf("login service: failed to generate jwt token : %w", err)
 	}

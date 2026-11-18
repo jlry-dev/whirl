@@ -24,14 +24,16 @@ type middlewareStruct struct {
 	logger  *slog.Logger
 	policy  *config.OriginPolicy
 	tickets *handler.TicketStore
+	jwtKey  []byte
 }
 
-func NewMiddleware(rsp *handler.ResponseHandler, logger *slog.Logger, policy *config.OriginPolicy, tickets *handler.TicketStore) Middleware {
+func NewMiddleware(rsp *handler.ResponseHandler, logger *slog.Logger, policy *config.OriginPolicy, tickets *handler.TicketStore, jwtKey []byte) Middleware {
 	return &middlewareStruct{
 		rsp:     rsp,
 		logger:  logger,
 		policy:  policy,
 		tickets: tickets,
+		jwtKey:  jwtKey,
 	}
 }
 
@@ -134,7 +136,7 @@ func (m *middlewareStruct) authenticate(w http.ResponseWriter, r *http.Request, 
 	ctx := r.Context()
 
 	// parse the claims of the token
-	token, err := util.ParseJWT(ctx, tokenStr)
+	token, err := util.ParseJWT(ctx, m.jwtKey, tokenStr)
 	if err != nil {
 		m.logger.Error(err.Error(), slog.String("METHOD", r.Method), slog.String("PATH", r.URL.Path))
 		if errors.Is(err, jwt.ErrTokenExpired) {

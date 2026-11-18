@@ -21,7 +21,10 @@ func main() {
 		}
 	}
 
-	srvConfig := config.Load()
+	srvConfig, err := config.Load()
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	dbPool := config.InitDB()
 
@@ -33,7 +36,7 @@ func main() {
 	messageRepository := repository.NewMessageRepository()
 
 	// Services
-	authSrv := service.NewAuthService(srvConfig.Validate, userRepository, countryRepository, dbPool)
+	authSrv := service.NewAuthService(srvConfig.Validate, userRepository, countryRepository, dbPool, srvConfig.JWTKey)
 	userSrv := service.NewUserService(srvConfig.Logger, userRepository, avatarRepository, dbPool)
 	frSrv := service.NewFriendshipService(*srvConfig.Validate, srvConfig.Logger, friendshipRepository, &userRepository, dbPool)
 	msgSrv := service.NewMessageService(srvConfig.Logger, messageRepository, dbPool)
@@ -51,7 +54,7 @@ func main() {
 	msgHandlr := handler.NewMessageHandler(msgSrv, rspHandler, srvConfig.Logger)
 
 	// Middleware
-	m := middleware.NewMiddleware(rspHandler, srvConfig.Logger, srvConfig.Origins, ticketStore)
+	m := middleware.NewMiddleware(rspHandler, srvConfig.Logger, srvConfig.Origins, ticketStore, srvConfig.JWTKey)
 
 	// Multiplexer
 	mux := http.NewServeMux()

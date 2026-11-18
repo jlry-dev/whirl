@@ -18,12 +18,14 @@ import (
 	"github.com/jlry-dev/whirl/internal/util"
 )
 
-const frontendOrigin = "https://whirl.example"
+const (
+	frontendOrigin = "https://whirl.example"
+	testJWTKey     = "test-key-at-least-32-bytes-long-1234"
+)
 
 func newTestMiddleware(t *testing.T, store *handler.TicketStore) middleware.Middleware {
 	t.Helper()
 
-	t.Setenv("JWT_KEY", "testkey")
 	t.Setenv("FRONTEND_ADDRESS", frontendOrigin)
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -34,13 +36,13 @@ func newTestMiddleware(t *testing.T, store *handler.TicketStore) middleware.Midd
 		store = handler.NewTicketStore(time.Minute)
 	}
 
-	return middleware.NewMiddleware(rsp, logger, policy, store)
+	return middleware.NewMiddleware(rsp, logger, policy, store, []byte(testJWTKey))
 }
 
 func newToken(t *testing.T, userID int) string {
 	t.Helper()
 
-	token, err := util.GenerateJWT(context.Background(), userID)
+	token, err := util.GenerateJWT(context.Background(), []byte(testJWTKey), userID)
 	require.NoError(t, err)
 
 	return token
