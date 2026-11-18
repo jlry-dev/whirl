@@ -10,3 +10,8 @@ type Friendship struct {
 }
 
 type FriendshipStatus string
+
+const (
+	FriendshipAccepted FriendshipStatus = "accepted"
+	FriendshipBlocked  FriendshipStatus = "blocked"
+)

@@ -309,3 +309,89 @@ func Test_CheckStatus(t *testing.T) {
 		})
 	}
 }
+
+func Test_CanMessage(t *testing.T) {
+	testCases := []struct {
+		name      string
+		from      int
+		to        int
+		mockSetup func(fr *mocks.MockFriendshipRepo)
+		wantErr   bool
+		expErr    error
+	}{
+		{
+			name: "accepted friends can message",
+			from: 1,
+			to:   2,
+			mockSetup: func(fr *mocks.MockFriendshipRepo) {
+				fr.On("GetFriendshipStatus", mock.Anything, mock.Anything, mock.Anything).
+					Return(model.FriendshipAccepted, true, nil)
+			},
+		},
+		{
+			name: "blocked pair is rejected",
+			from: 1,
+			to:   2,
+			mockSetup: func(fr *mocks.MockFriendshipRepo) {
+				fr.On("GetFriendshipStatus", mock.Anything, mock.Anything, mock.Anything).
+					Return(model.FriendshipBlocked, true, nil)
+			},
+			wantErr: true,
+			expErr:  service.ErrMessagingBlocked,
+		},
+		{
+			name: "non-friends are rejected",
+			from: 1,
+			to:   2,
+			mockSetup: func(fr *mocks.MockFriendshipRepo) {
+				fr.On("GetFriendshipStatus", mock.Anything, mock.Anything, mock.Anything).
+					Return(model.FriendshipStatus(""), false, nil)
+			},
+			wantErr: true,
+			expErr:  service.ErrNotFriends,
+		},
+		{
+			name:      "self message is rejected without a query",
+			from:      1,
+			to:        1,
+			mockSetup: func(fr *mocks.MockFriendshipRepo) {},
+			wantErr:   true,
+			expErr:    service.ErrNotFriends,
+		},
+		{
+			name: "repository error is propagated",
+			from: 1,
+			to:   2,
+			mockSetup: func(fr *mocks.MockFriendshipRepo) {
+				fr.On("GetFriendshipStatus", mock.Anything, mock.Anything, mock.Anything).
+					Return(model.FriendshipStatus(""), false, errors.New("database error"))
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			vld := validator.New(validator.WithRequiredStructEnabled())
+			frRepo := new(mocks.MockFriendshipRepo)
+			userRepo := new(mocks.MockUserRepo)
+
+			tc.mockSetup(frRepo)
+
+			var userRepoInterface repository.UserRepository = userRepo
+			srv := service.NewFriendshipService(*vld, nil, frRepo, &userRepoInterface, nil)
+			err := srv.CanMessage(context.Background(), tc.from, tc.to)
+
+			if tc.wantErr {
+				assert.Error(t, err)
+				if tc.expErr != nil {
+					assert.ErrorIs(t, err, tc.expErr)
+				}
+			} else {
+				assert.NoError(t, err)
+			}
+
+			frRepo.AssertExpectations(t)
+		})
+	}
+}

@@ -17,6 +17,8 @@ import (
 var (
 	ErrNoFriendshipExist = errors.New("service: no friendship exist")
 	ErrFriendshipExists  = errors.New("service: friendship already exists")
+	ErrMessagingBlocked  = errors.New("service: messaging is blocked")
+	ErrNotFriends        = errors.New("service: users are not friends")
 )
 
 type FriendshipService interface {
@@ -25,6 +27,7 @@ type FriendshipService interface {
 	UpdateFriendshipStatus(context.Context, *dto.FriendshipDTO) (*dto.FrienshipServiceSuccessDTO, error)
 	RetrieveFriends(ctx context.Context, userID, page int) (*dto.FriendsDetailsResponse, error)
 	CheckStatus(context.Context, *dto.FriendshipDTO) (bool, error)
+	CanMessage(ctx context.Context, from, to int) error
 }
 
 func NewFriendshipService(validate validator.Validate, logger *slog.Logger, frRepo repository.FriendshipRepository, userRepo *repository.UserRepository, db *pgxpool.Pool) FriendshipService {
@@ -181,4 +184,34 @@ func (srv *FriendshipSrv) CheckStatus(ctx context.Context, data *dto.FriendshipD
 	}
 
 	return exists, nil
+}
+
+// CanMessage checks if from is allowed to send a direct message to to.
+// Accepted friends lang ang pwede, and blocked always rejects.
+func (srv *FriendshipSrv) CanMessage(ctx context.Context, from, to int) error {
+	if from == to {
+		return ErrNotFriends
+	}
+
+	status, exists, err := srv.frRepo.GetFriendshipStatus(ctx, srv.db, &model.Friendship{
+		UID_1: from,
+		UID_2: to,
+	})
+	if err != nil {
+		return fmt.Errorf("service: failed to check messaging permission : %w", err)
+	}
+
+	if !exists {
+		return ErrNotFriends
+	}
+
+	if status == model.FriendshipBlocked {
+		return ErrMessagingBlocked
+	}
+
+	if status != model.FriendshipAccepted {
+		return ErrNotFriends
+	}
+
+	return nil
 }

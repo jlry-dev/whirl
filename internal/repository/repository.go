@@ -31,6 +31,7 @@ type FriendshipRepository interface {
 	UpdateFriendshipStatus(ctx context.Context, qr Queryer, fr *model.Friendship) error
 	GetFriends(ctx context.Context, qr Queryer, userID, page int) ([]*dto.FriendDetails, error)
 	CheckRelationship(ctx context.Context, qr Queryer, fr *model.Friendship) (bool, error)
+	GetFriendshipStatus(ctx context.Context, qr Queryer, fr *model.Friendship) (model.FriendshipStatus, bool, error)
 }
 
 type MessageRepository interface {

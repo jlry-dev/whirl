@@ -681,6 +681,24 @@ func (h *Hub) handleDirectMessage(m *Message) {
 		return
 	}
 
+	// Client ang nagpili sa m.To, so i-check kung friends ba sila and wala
+	// na block. Wala ni before, so bisan kinsa pwede ma-message.
+	if err := h.canMessage(m.From, m.To); err != nil {
+		h.logger.Info("direct message rejected",
+			slog.Int("from", m.From),
+			slog.Int("to", m.To),
+			slog.String("reason", err.Error()))
+
+		// Same error code sa frontend para ma-mark as failed ang message.
+		client.enqueue(&Message{
+			Type:    "error",
+			Code:    "SEND_MESSAGE_FAILED",
+			Content: "You can't message this user.",
+		})
+
+		return
+	}
+
 	if m.Timestamp.IsZero() {
 		m.Timestamp = time.Now()
 	}
@@ -696,7 +714,7 @@ func (h *Hub) handleDirectMessage(m *Message) {
 		client.enqueue(&Message{
 			Type:    "error",
 			Code:    "SEND_MESSAGE_FAILED",
-			Content: "Random pair has disconnected",
+			Content: "Message failed to send.",
 		})
 
 		return
@@ -706,6 +724,18 @@ func (h *Hub) handleDirectMessage(m *Message) {
 	if online {
 		receiver.enqueue(m)
 	}
+}
+
+// canMessage runs the friendship check with the hub DB timeout.
+func (h *Hub) canMessage(from, to int) error {
+	if h.frSrv == nil {
+		return errors.New("hub: friendship service is not configured")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), hubDBTimeout)
+	defer cancel()
+
+	return h.frSrv.CanMessage(ctx, from, to)
 }
 
 func (h *Hub) handleRandomMessage(m *Message) {

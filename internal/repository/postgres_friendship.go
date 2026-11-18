@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/jackc/pgerrcode"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jlry-dev/whirl/internal/model"
 	"github.com/jlry-dev/whirl/internal/model/dto"
@@ -144,4 +145,24 @@ func (f *FriendshipRepo) CheckRelationship(ctx context.Context, qr Queryer, fr *
 	}
 
 	return exists, nil
+}
+
+// GetFriendshipStatus returns the status of the pair, and false kung wala silay
+// relationship row. Kani ang gamiton para check kung pwede ba mag message, kay
+// CheckRelationship mo return ug true bisan blocked pa.
+func (f *FriendshipRepo) GetFriendshipStatus(ctx context.Context, qr Queryer, fr *model.Friendship) (model.FriendshipStatus, bool, error) {
+	user1, user2 := normalizePair(fr.UID_1, fr.UID_2)
+
+	qry := `SELECT "status" FROM "friendship" WHERE "user1_id" = $1 AND "user2_id" = $2`
+
+	var status string
+	if err := qr.QueryRow(ctx, qry, user1, user2).Scan(&status); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", false, nil
+		}
+
+		return "", false, fmt.Errorf("repo: failed to get friendship status : %w", err)
+	}
+
+	return model.FriendshipStatus(status), true, nil
 }
