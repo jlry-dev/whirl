@@ -37,10 +37,11 @@ type UserSrv struct {
 	cld        *cloudinary.Cloudinary
 }
 
-func NewUserService(logger *slog.Logger, userRepo repository.UserRepository, avatarRepo repository.AvatarRepository, db *pgxpool.Pool) UserService {
+func NewUserService(logger *slog.Logger, userRepo repository.UserRepository, avatarRepo repository.AvatarRepository, db *pgxpool.Pool) (UserService, error) {
 	cld, err := cloudinary.NewFromURL(os.Getenv("CLOUDINARY_URL"))
 	if err != nil {
-		panic("initilizing cloudinary SDK failed")
+		// Dati panic ni, walay rason. Error na lang para makita sa startup log.
+		return nil, fmt.Errorf("service: invalid CLOUDINARY_URL: %w", err)
 	}
 
 	pHash := imghash.NewPHash()
@@ -52,7 +53,7 @@ func NewUserService(logger *slog.Logger, userRepo repository.UserRepository, ava
 		pHash:      &pHash,
 		db:         db,
 		cld:        cld,
-	}
+	}, nil
 }
 
 func (srv *UserSrv) UpdateAvatar(ctx context.Context, data *dto.UpdateAvatarDTO) (*dto.UpdateAvatarSuccessDTO, error) {

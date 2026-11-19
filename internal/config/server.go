@@ -16,11 +16,16 @@ import (
 // shorter key weakens the signature more than the hash itself.
 const jwtMinKeyBytes = 32
 
+// DefaultServerAddress ang gamiton kung wala gi-set ang SERVER_ADDRESS.
+// Without this, Go's http.Server listens on :http (port 80) when Addr is empty.
+const DefaultServerAddress = ":8080"
+
 type Config struct {
 	Logger   *slog.Logger
 	Validate *validator.Validate
 	Origins  *OriginPolicy
 	JWTKey   []byte
+	Address  string
 }
 
 func Load() (Config, error) {
@@ -48,7 +53,18 @@ func Load() (Config, error) {
 		Validate: v,
 		Origins:  LoadOriginPolicy(l),
 		JWTKey:   key,
+		Address:  loadServerAddress(),
 	}, nil
+}
+
+// loadServerAddress returns SERVER_ADDRESS, or a sane default kung wala.
+func loadServerAddress() string {
+	addr := strings.TrimSpace(os.Getenv("SERVER_ADDRESS"))
+	if addr == "" {
+		return DefaultServerAddress
+	}
+
+	return addr
 }
 
 // loadJWTKey reads JWT_KEY once at startup. Daghan kaayo ug paagi ma-misconfigure

@@ -190,6 +190,7 @@ type Hub struct {
 
 	clientMU sync.RWMutex
 	clients  map[string]*Client
+	closing  bool
 
 	// friendMU guards friendRequests. It is a leaf lock: no other Hub or
 	// database call is made while it is held.
@@ -386,6 +387,13 @@ func (h *Hub) Connect(c *Client) {
 	clientID := c.userID.String()
 
 	h.clientMU.Lock()
+	if h.closing {
+		// Naunhan mi sa shutdown. Dili na ni pwede mo-register, so close na lang.
+		h.clientMU.Unlock()
+		c.close()
+		return
+	}
+
 	old := h.clients[clientID]
 	h.clients[clientID] = c
 	h.clientMU.Unlock()
@@ -394,6 +402,34 @@ func (h *Hub) Connect(c *Client) {
 	// here also unblocks its ReadMessage/WriteMessage goroutines.
 	if old != nil && old != c {
 		h.detach(old)
+	}
+}
+
+// Close closes every active WebSocket. http.Server.Shutdown doesn't touch
+// hijacked connections, so kani ang mohatag nila ug clean close during deploy.
+// Best effort lang ang close frame; kung patay na ang socket, close lang.
+func (h *Hub) Close() {
+	h.clientMU.Lock()
+	h.closing = true
+
+	clients := make([]*Client, 0, len(h.clients))
+	for _, c := range h.clients {
+		clients = append(clients, c)
+	}
+	h.clients = make(map[string]*Client)
+	h.clientMU.Unlock()
+
+	deadline := time.Now().Add(time.Second)
+	for _, c := range clients {
+		if c.ws != nil {
+			_ = c.ws.WriteControl(
+				websocket.CloseMessage,
+				websocket.FormatCloseMessage(websocket.CloseGoingAway, "server shutting down"),
+				deadline,
+			)
+		}
+
+		c.close()
 	}
 }
 
