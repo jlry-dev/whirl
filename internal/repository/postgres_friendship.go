@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 
@@ -54,12 +55,15 @@ func (f *FriendshipRepo) CreateFriendship(ctx context.Context, qr Queryer, fr *m
 	return nil
 }
 
-func (f *FriendshipRepo) DeleteFriendship(ctx context.Context, qr Queryer, fr *model.Friendship) error {
+func (f *FriendshipRepo) DeleteFriendship(ctx context.Context, qr Queryer, fr *model.Friendship, caller int) error {
 	user1, user2 := normalizePair(fr.UID_1, fr.UID_2)
 
-	qry := `DELETE FROM "friendship" WHERE "user1_id" = $1 AND "user2_id" = $2`
+	// A blocked user must not be able to erase the block by deleting the row.
+	qry := `DELETE FROM "friendship"
+		WHERE "user1_id" = $1 AND "user2_id" = $2
+		AND ("status" <> 'blocked' OR "blocked_by" = $3)`
 
-	result, err := qr.Exec(ctx, qry, user1, user2)
+	result, err := qr.Exec(ctx, qry, user1, user2, caller)
 	if err != nil {
 		return fmt.Errorf("repo: failed to delete friendship : %w", err)
 	}
@@ -71,14 +75,28 @@ func (f *FriendshipRepo) DeleteFriendship(ctx context.Context, qr Queryer, fr *m
 	return nil
 }
 
-func (f *FriendshipRepo) UpdateFriendshipStatus(ctx context.Context, qr Queryer, fr *model.Friendship) error {
+func (f *FriendshipRepo) UpdateFriendshipStatus(ctx context.Context, qr Queryer, fr *model.Friendship, caller int) error {
 	user1, user2 := normalizePair(fr.UID_1, fr.UID_2)
 
-	qry := `UPDATE "friendship"
-		SET "status" = $1
-		WHERE "user1_id" = $2 AND "user2_id" = $3`
+	var qry string
 
-	result, err := qr.Exec(ctx, qry, fr.Status, user1, user2)
+	switch fr.Status {
+	case model.FriendshipBlocked:
+		// First block wins. Re-blocking must not change who created it.
+		qry = `UPDATE "friendship"
+			SET "status" = 'blocked', "blocked_by" = $3
+			WHERE "user1_id" = $1 AND "user2_id" = $2 AND "status" <> 'blocked'`
+	case model.FriendshipAccepted:
+		// Only the user who created the block can lift it.
+		qry = `UPDATE "friendship"
+			SET "status" = 'accepted', "blocked_by" = NULL
+			WHERE "user1_id" = $1 AND "user2_id" = $2
+			AND "status" = 'blocked' AND "blocked_by" = $3`
+	default:
+		return fmt.Errorf("repo: invalid friendship status %q", fr.Status)
+	}
+
+	result, err := qr.Exec(ctx, qry, user1, user2, caller)
 	if err != nil {
 		return fmt.Errorf("repo: failed to update friendship : %w", err)
 	}
@@ -147,22 +165,34 @@ func (f *FriendshipRepo) CheckRelationship(ctx context.Context, qr Queryer, fr *
 	return exists, nil
 }
 
-// GetFriendshipStatus returns the status of the pair, and false kung wala silay
-// relationship row. Kani ang gamiton para check kung pwede ba mag message, kay
-// CheckRelationship mo return ug true bisan blocked pa.
-func (f *FriendshipRepo) GetFriendshipStatus(ctx context.Context, qr Queryer, fr *model.Friendship) (model.FriendshipStatus, bool, error) {
-	user1, user2 := normalizePair(fr.UID_1, fr.UID_2)
+// GetFriendship returns the stored relationship for the pair, including who
+// created the block kung blocked. ErrNoRowsFound kung wala silay relationship.
+func (f *FriendshipRepo) GetFriendship(ctx context.Context, qr Queryer, userA, userB int) (*model.Friendship, error) {
+	user1, user2 := normalizePair(userA, userB)
 
-	qry := `SELECT "status" FROM "friendship" WHERE "user1_id" = $1 AND "user2_id" = $2`
+	qry := `SELECT "user1_id", "user2_id", "status", "blocked_by"
+		FROM "friendship" WHERE "user1_id" = $1 AND "user2_id" = $2`
 
-	var status string
-	if err := qr.QueryRow(ctx, qry, user1, user2).Scan(&status); err != nil {
+	var (
+		fr        model.Friendship
+		status    string
+		blockedBy sql.NullInt64
+	)
+
+	if err := qr.QueryRow(ctx, qry, user1, user2).Scan(&fr.UID_1, &fr.UID_2, &status, &blockedBy); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return "", false, nil
+			return nil, ErrNoRowsFound
 		}
 
-		return "", false, fmt.Errorf("repo: failed to get friendship status : %w", err)
+		return nil, fmt.Errorf("repo: failed to get friendship : %w", err)
 	}
 
-	return model.FriendshipStatus(status), true, nil
+	fr.Status = model.FriendshipStatus(status)
+
+	if blockedBy.Valid {
+		id := int(blockedBy.Int64)
+		fr.BlockedBy = &id
+	}
+
+	return &fr, nil
 }

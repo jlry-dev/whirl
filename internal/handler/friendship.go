@@ -83,6 +83,11 @@ func (h *FriendshipHandlr) RemoveFriend(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 
+		if errors.Is(err, service.ErrBlockedByOther) {
+			h.rspHandler.Error(w, http.StatusForbidden, "not allowed to change this block", nil)
+			return
+		}
+
 		h.rspHandler.Error(w, http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError), nil)
 		return
 	}
@@ -139,6 +144,11 @@ func (h *FriendshipHandlr) UpdateFriendshipStatus(w http.ResponseWriter, r *http
 
 		if errors.Is(err, service.ErrNoFriendshipExist) {
 			h.rspHandler.Error(w, http.StatusNotFound, "no friendship record not found", nil)
+			return
+		}
+
+		if errors.Is(err, service.ErrBlockedByOther) {
+			h.rspHandler.Error(w, http.StatusForbidden, "not allowed to change this block", nil)
 			return
 		}
 

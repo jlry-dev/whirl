@@ -27,11 +27,11 @@ type CountryRepository interface {
 
 type FriendshipRepository interface {
 	CreateFriendship(ctx context.Context, qr Queryer, fr *model.Friendship) error
-	DeleteFriendship(ctx context.Context, qr Queryer, fr *model.Friendship) error
-	UpdateFriendshipStatus(ctx context.Context, qr Queryer, fr *model.Friendship) error
+	DeleteFriendship(ctx context.Context, qr Queryer, fr *model.Friendship, caller int) error
+	UpdateFriendshipStatus(ctx context.Context, qr Queryer, fr *model.Friendship, caller int) error
 	GetFriends(ctx context.Context, qr Queryer, userID, page int) ([]*dto.FriendDetails, error)
 	CheckRelationship(ctx context.Context, qr Queryer, fr *model.Friendship) (bool, error)
-	GetFriendshipStatus(ctx context.Context, qr Queryer, fr *model.Friendship) (model.FriendshipStatus, bool, error)
+	GetFriendship(ctx context.Context, qr Queryer, userA, userB int) (*model.Friendship, error)
 }
 
 type MessageRepository interface {

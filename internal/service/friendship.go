@@ -19,6 +19,7 @@ var (
 	ErrFriendshipExists  = errors.New("service: friendship already exists")
 	ErrMessagingBlocked  = errors.New("service: messaging is blocked")
 	ErrNotFriends        = errors.New("service: users are not friends")
+	ErrBlockedByOther    = errors.New("service: block was created by the other user")
 )
 
 type FriendshipService interface {
@@ -108,7 +109,22 @@ func (srv *FriendshipSrv) RemoveFriend(ctx context.Context, data *dto.Friendship
 		UID_2: data.To,
 	}
 
-	err := srv.frRepo.DeleteFriendship(ctx, srv.db, fr)
+	current, err := srv.frRepo.GetFriendship(ctx, srv.db, data.From, data.To)
+	if err != nil {
+		if errors.Is(err, repository.ErrNoRowsFound) {
+			return nil, ErrNoFriendshipExist
+		}
+
+		return nil, fmt.Errorf("service: failed to load friendship: %w", err)
+	}
+
+	// Ang nag-block ra ang pwede mo delete sa blocked row. Otherwise ma-erase
+	// ang block and pwede na sad sila mag friend balik.
+	if current.Status == model.FriendshipBlocked && (current.BlockedBy == nil || *current.BlockedBy != data.From) {
+		return nil, ErrBlockedByOther
+	}
+
+	err = srv.frRepo.DeleteFriendship(ctx, srv.db, fr, data.From)
 	if err != nil {
 		if errors.Is(err, repository.ErrNoRowsFound) {
 			return nil, ErrNoFriendshipExist
@@ -136,24 +152,72 @@ func (srv *FriendshipSrv) UpdateFriendshipStatus(ctx context.Context, data *dto.
 		return nil, &ve
 	}
 
-	fr := &model.Friendship{
-		UID_1:  data.From,
-		UID_2:  data.To,
-		Status: model.FriendshipStatus(data.Status),
+	status := model.FriendshipStatus(data.Status)
+	if status != model.FriendshipAccepted && status != model.FriendshipBlocked {
+		return nil, &ErrVldFailed{Fields: map[string]string{"status": "status must be accepted or blocked"}}
 	}
 
-	err := srv.frRepo.UpdateFriendshipStatus(ctx, srv.db, fr)
+	current, err := srv.frRepo.GetFriendship(ctx, srv.db, data.From, data.To)
 	if err != nil {
 		if errors.Is(err, repository.ErrNoRowsFound) {
 			return nil, ErrNoFriendshipExist
 		}
 
-		return nil, fmt.Errorf("service: failed to delete friendship: %w", err)
+		return nil, fmt.Errorf("service: failed to load friendship: %w", err)
 	}
 
-	return &dto.FrienshipServiceSuccessDTO{
+	success := &dto.FrienshipServiceSuccessDTO{
 		Message: "Successfully updated friendship status",
-	}, nil
+	}
+
+	switch status {
+	case model.FriendshipBlocked:
+		// Idempotent ra. Kung blocked na, keep ang original blocker.
+		if current.Status == model.FriendshipBlocked {
+			return success, nil
+		}
+	case model.FriendshipAccepted:
+		// Wala tay buhaton kung accepted na.
+		if current.Status != model.FriendshipBlocked {
+			return success, nil
+		}
+
+		// Ang nag-block ra ang pwede mo unblock.
+		if current.BlockedBy == nil || *current.BlockedBy != data.From {
+			return nil, ErrBlockedByOther
+		}
+	}
+
+	fr := &model.Friendship{
+		UID_1:  data.From,
+		UID_2:  data.To,
+		Status: status,
+	}
+
+	err = srv.frRepo.UpdateFriendshipStatus(ctx, srv.db, fr, data.From)
+	if err != nil {
+		if errors.Is(err, repository.ErrNoRowsFound) {
+			// Naunhan mi ug concurrent update, so re-read and decide.
+			latest, readErr := srv.frRepo.GetFriendship(ctx, srv.db, data.From, data.To)
+			if readErr != nil {
+				if errors.Is(readErr, repository.ErrNoRowsFound) {
+					return nil, ErrNoFriendshipExist
+				}
+
+				return nil, fmt.Errorf("service: failed to re-read friendship: %w", readErr)
+			}
+
+			if latest.Status == status {
+				return success, nil
+			}
+
+			return nil, ErrBlockedByOther
+		}
+
+		return nil, fmt.Errorf("service: failed to update friendship status: %w", err)
+	}
+
+	return success, nil
 }
 
 func (srv *FriendshipSrv) RetrieveFriends(ctx context.Context, userID, page int) (*dto.FriendsDetailsResponse, error) {
@@ -193,23 +257,20 @@ func (srv *FriendshipSrv) CanMessage(ctx context.Context, from, to int) error {
 		return ErrNotFriends
 	}
 
-	status, exists, err := srv.frRepo.GetFriendshipStatus(ctx, srv.db, &model.Friendship{
-		UID_1: from,
-		UID_2: to,
-	})
+	fr, err := srv.frRepo.GetFriendship(ctx, srv.db, from, to)
 	if err != nil {
+		if errors.Is(err, repository.ErrNoRowsFound) {
+			return ErrNotFriends
+		}
+
 		return fmt.Errorf("service: failed to check messaging permission : %w", err)
 	}
 
-	if !exists {
-		return ErrNotFriends
-	}
-
-	if status == model.FriendshipBlocked {
+	if fr.Status == model.FriendshipBlocked {
 		return ErrMessagingBlocked
 	}
 
-	if status != model.FriendshipAccepted {
+	if fr.Status != model.FriendshipAccepted {
 		return ErrNotFriends
 	}
 
