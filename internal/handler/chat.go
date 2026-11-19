@@ -3,11 +3,14 @@ package handler
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gorilla/websocket"
 	"github.com/jlry-dev/whirl/internal/config"
@@ -32,7 +35,38 @@ const (
 	// hubDBTimeout bounds database work done by Hub workers so a slow query
 	// cannot stall a shard or the matchmaker forever.
 	hubDBTimeout = 10 * time.Second
+
+	// maxMessageContentRunes mirrors the message_content_length CHECK in
+	// migration 000003. Postgres char_length counts characters, not bytes.
+	maxMessageContentRunes = 4000
+
+	// wsReadLimitBytes bounds a whole WebSocket message. 4000 four-byte runes
+	// is 16 KB, and JSON escaping of control characters can grow that to
+	// ~24 KB, so 32 KB still accepts valid content and rejects junk early.
+	wsReadLimitBytes = 32 * 1024
+
+	// Server pings every 30s. A peer that does not pong within 60s is dead.
+	// 30s also stays under common 60s proxy idle timeouts.
+	wsPongWait     = 60 * time.Second
+	wsPingInterval = 30 * time.Second
+	wsWriteWait    = 10 * time.Second
 )
+
+type wsOptions struct {
+	readLimit    int64
+	pongWait     time.Duration
+	pingInterval time.Duration
+	writeWait    time.Duration
+}
+
+func defaultWSOptions() wsOptions {
+	return wsOptions{
+		readLimit:    wsReadLimitBytes,
+		pongWait:     wsPongWait,
+		pingInterval: wsPingInterval,
+		writeWait:    wsWriteWait,
+	}
+}
 
 type uid int
 
@@ -55,6 +89,7 @@ type ChatHandlr struct {
 	logger     *slog.Logger
 	upgrader   websocket.Upgrader
 	tickets    *TicketStore
+	opts       wsOptions
 }
 
 func NewChatHandler(logger *slog.Logger, rspHandler *ResponseHandler, hub *Hub, policy *config.OriginPolicy, tickets *TicketStore) ChatHandler {
@@ -63,6 +98,7 @@ func NewChatHandler(logger *slog.Logger, rspHandler *ResponseHandler, hub *Hub, 
 		rspHandler: rspHandler,
 		hub:        hub,
 		tickets:    tickets,
+		opts:       defaultWSOptions(),
 		upgrader: websocket.Upgrader{
 			// Pages lang from a configured frontend origin ang pwede mo open
 			// ug WebSocket. Browser always sends Origin; walay Origin = dili
@@ -122,6 +158,12 @@ func (h *ChatHandlr) SocketConnect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	ws.SetReadLimit(h.opts.readLimit)
+	_ = ws.SetReadDeadline(time.Now().Add(h.opts.pongWait))
+	ws.SetPongHandler(func(string) error {
+		return ws.SetReadDeadline(time.Now().Add(h.opts.pongWait))
+	})
+
 	cl := &Client{
 		logger: h.logger,
 		userID: uid(userID),
@@ -129,6 +171,7 @@ func (h *ChatHandlr) SocketConnect(w http.ResponseWriter, r *http.Request) {
 		ws:     ws,
 		send:   make(chan *Message, 20),
 		done:   make(chan struct{}),
+		opts:   h.opts,
 	}
 
 	// Register the client before starting its reader. Because the registration
@@ -159,6 +202,7 @@ type Client struct {
 	done       chan struct{}
 	closeOnce  sync.Once
 	randomPair *Client
+	opts       wsOptions
 }
 
 // pairKey identifies the two participants of a friendship in a canonical
@@ -937,14 +981,23 @@ func (h *Hub) notifyFriendRequestFailed(sender, receiver *Client) {
 func (c *Client) WriteMessage() {
 	defer c.close()
 
+	ticker := time.NewTicker(c.opts.pingInterval)
+	defer ticker.Stop()
+
 	for {
 		select {
 		case <-c.done:
 			return
 		case m := <-c.send:
-			_ = c.ws.SetWriteDeadline(time.Now().Add(10 * time.Second))
+			_ = c.ws.SetWriteDeadline(time.Now().Add(c.opts.writeWait))
 			if err := c.ws.WriteJSON(m); err != nil {
 				c.logger.Error("socket error: failed to write JSON", slog.String("error", err.Error()))
+				return
+			}
+		case <-ticker.C:
+			_ = c.ws.SetWriteDeadline(time.Now().Add(c.opts.writeWait))
+			if err := c.ws.WriteMessage(websocket.PingMessage, nil); err != nil {
+				c.logger.Debug("socket ping failed", slog.String("error", err.Error()))
 				return
 			}
 		}
@@ -961,10 +1014,7 @@ func (c *Client) ReadMessage() {
 		}, nil)
 	}()
 
-	// Add maxsize read
-	// Add timer
 	for {
-		// TODO: validate data
 		var msg Message
 		if err := c.ws.ReadJSON(&msg); err != nil {
 			c.logger.Error("read message: closing socket got error", slog.String("error", err.Error()))
@@ -989,7 +1039,24 @@ func (c *Client) ReadMessage() {
 				return
 			}
 
-		case "message_random", "direct_message", "friend_request":
+		case "message_random", "direct_message":
+			if err := validateMessageContent(msg.Content); err != nil {
+				c.enqueue(&Message{
+					Type:    "error",
+					Code:    "MESSAGE_REJECTED",
+					Content: err.Error(),
+				})
+				continue
+			}
+
+			m := msg
+			if !c.hub.submitUser(c.userID, func() {
+				c.hub.HandleMessage(&m)
+			}, c.done) {
+				return
+			}
+
+		case "friend_request":
 			m := msg
 			if !c.hub.submitUser(c.userID, func() {
 				c.hub.HandleMessage(&m)
@@ -1005,6 +1072,21 @@ func (c *Client) ReadMessage() {
 			})
 		}
 	}
+}
+
+// validateMessageContent keeps input inline with the DB constraint and rejects
+// empty or too-long content before it reaches the Hub. Dili ni mo-trim sa
+// content; TrimSpace is only for the emptiness check.
+func validateMessageContent(content string) error {
+	if strings.TrimSpace(content) == "" {
+		return errors.New("message is empty")
+	}
+
+	if utf8.RuneCountInString(content) > maxMessageContentRunes {
+		return fmt.Errorf("message is too long (max %d characters)", maxMessageContentRunes)
+	}
+
+	return nil
 }
 
 func (c *Client) close() {
